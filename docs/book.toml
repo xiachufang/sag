@@ -12,8 +12,8 @@ create-missing = false
 [output.html]
 default-theme = "light"
 preferred-dark-theme = "navy"
-git-repository-url = "https://github.com/OWNER/simple-ai-gateway"
-edit-url-template = "https://github.com/OWNER/simple-ai-gateway/edit/main/docs/{path}"
+git-repository-url = "https://github.com/xiachufang/sag"
+edit-url-template = "https://github.com/xiachufang/sag/edit/main/docs/{path}"
 no-section-label = false
 
 [output.html.fold]
