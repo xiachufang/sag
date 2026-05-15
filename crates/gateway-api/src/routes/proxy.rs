@@ -122,7 +122,7 @@ pub async fn proxy_handler(
         Some(p) if matches!(p.directive, CacheDirective::Bypass) => (CacheStatus::Bypass, None),
         Some(p) if matches!(p.directive, CacheDirective::Refresh) => (CacheStatus::Refresh, None),
         Some(_) => match state.stores.kv.get(&cache_key).await {
-            Ok(Some(blob)) => match serde_json::from_slice::<CachedResponse>(&blob) {
+            Ok(Some(blob)) => match CachedResponse::decode(&blob) {
                 Ok(cached) => (CacheStatus::Hit, Some(cached)),
                 Err(e) => {
                     tracing::warn!(error = %e, "failed to deserialize cached response");
@@ -317,13 +317,18 @@ pub async fn proxy_handler(
                 chunks: cache_chunks,
                 finished_at_ms: chrono::Utc::now().timestamp_millis(),
             };
-            if let Ok(blob) = serde_json::to_vec(&payload) {
-                if let Some(ttl) = cache_ttl {
-                    if let Err(e) = kv.put(&cache_key_for_write, Bytes::from(blob), ttl).await {
-                        tracing::warn!(error = %e, "failed to write cache");
-                    } else {
-                        metrics::counter!("gateway_cache_response_write_total").increment(1);
+            match payload.encode() {
+                Ok(blob) => {
+                    if let Some(ttl) = cache_ttl {
+                        if let Err(e) = kv.put(&cache_key_for_write, Bytes::from(blob), ttl).await {
+                            tracing::warn!(error = %e, "failed to write cache");
+                        } else {
+                            metrics::counter!("gateway_cache_response_write_total").increment(1);
+                        }
                     }
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "failed to encode cached response");
                 }
             }
         }
