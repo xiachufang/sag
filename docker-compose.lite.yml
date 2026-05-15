@@ -1,0 +1,16 @@
+services:
+  gateway:
+    build: .
+    restart: unless-stopped
+    environment:
+      GATEWAY_ROOT_TOKEN: ${GATEWAY_ROOT_TOKEN:?set GATEWAY_ROOT_TOKEN before running compose up}
+      GATEWAY_MASTER_KEY: ${GATEWAY_MASTER_KEY:?set GATEWAY_MASTER_KEY before running compose up}
+      OPENAI_API_KEY: ${OPENAI_API_KEY-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY-}
+      RUST_LOG: ${RUST_LOG:-info,sqlx::query=warn}
+    volumes:
+      - ./data:/app/data
+      - ./config:/app/config:ro
+    ports:
+      - "8080:8080"
+    command: ["--config", "/app/config/example.lite.yaml"]

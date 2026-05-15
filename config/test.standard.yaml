@@ -1,0 +1,32 @@
+server:
+  bind: 127.0.0.1:8080
+  default_project_id: default
+
+storage:
+  profile: standard
+  postgres:
+    url: postgres://gateway:gatewaypass@127.0.0.1:54329/gateway
+    max_connections: 8
+  redis:
+    url: redis://127.0.0.1:63799/0
+  cache:
+    l1_memory_mb: 64
+    l2_max_size_mb: 256
+
+admin:
+  root_token_env: GATEWAY_ROOT_TOKEN
+
+providers:
+  openai:
+    base_url: http://127.0.0.1:18181
+    credential_ref: env://OPENAI_API_KEY
+
+routes:
+  - primary: { provider: openai }
+    cache: { enabled: true, ttl: 60 }
+    retry: { max_attempts: 1, initial_backoff_ms: 100 }
+
+limits:
+  - target: { type: key, id: "*" }
+    rpm: 100
+budgets: []

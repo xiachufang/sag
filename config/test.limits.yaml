@@ -1,0 +1,28 @@
+server:
+  bind: 127.0.0.1:8080
+  default_project_id: default
+
+storage:
+  profile: lite
+  sqlite:
+    path: ./data/gateway-limits.db
+
+admin:
+  root_token_env: GATEWAY_ROOT_TOKEN
+
+providers:
+  openai:
+    base_url: https://httpbin.org
+    credential_ref: env://OPENAI_API_KEY
+
+routes:
+  - primary: { provider: openai }
+    cache: { enabled: false, ttl: 0 }
+    retry: { max_attempts: 1, initial_backoff_ms: 100 }
+
+# Strict limits so we can hit them in a smoke test.
+limits:
+  - target: { type: key, id: "*" }
+    rpm: 3
+    concurrency: 2
+budgets: []

@@ -1,0 +1,34 @@
+[book]
+title = "simple-ai-gateway"
+description = "A lightweight Rust AI gateway — auth, rate limit, budget, cache, retry & fallback."
+authors = ["simple-ai-gateway contributors"]
+language = "zh-CN"
+src = "src"
+
+[build]
+build-dir = "book"
+create-missing = false
+
+[output.html]
+default-theme = "light"
+preferred-dark-theme = "navy"
+git-repository-url = "https://github.com/OWNER/simple-ai-gateway"
+edit-url-template = "https://github.com/OWNER/simple-ai-gateway/edit/main/docs/{path}"
+no-section-label = false
+
+[output.html.fold]
+enable = true
+level = 1
+
+[output.html.search]
+enable = true
+limit-results = 30
+use-boolean-and = true
+boost-title = 2
+boost-hierarchy = 1
+boost-paragraph = 1
+expand = true
+heading-split-level = 3
+
+[output.html.print]
+enable = true

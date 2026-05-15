@@ -1,0 +1,52 @@
+server:
+  bind: 127.0.0.1:8080
+  request_timeout_ms: 30000
+  default_project_id: default
+
+storage:
+  profile: lite
+  sqlite:
+    path: ./data/gateway-test.db
+    max_size_mb: 1024
+    log_retention_days: 7
+  cache:
+    l1_memory_mb: 64
+    l2_max_size_mb: 256
+
+admin:
+  root_token_env: GATEWAY_ROOT_TOKEN
+  password_login: false
+
+providers:
+  # Both providers point at httpbin.org for easy verification.
+  # Real M3 tests below depend on httpbin's /anything (always 200) and
+  # /status/{code} (deterministic status code).
+  openai:
+    base_url: https://httpbin.org
+    credential_ref: env://OPENAI_API_KEY
+  anthropic:
+    base_url: https://httpbin.org
+    credential_ref: env://ANTHROPIC_API_KEY
+
+routes:
+  - primary:
+      provider: openai
+    cache:
+      enabled: true
+      ttl: 60
+    retry:
+      max_attempts: 2
+      initial_backoff_ms: 100
+    fallbacks:
+      - provider: anthropic
+        trigger: [upstream_5xx, timeout]
+
+limits: []
+budgets: []
+
+observability:
+  metrics: true
+  tracing:
+    enabled: true
+    format: json
+    otlp_endpoint: null

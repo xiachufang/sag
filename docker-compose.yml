@@ -1,0 +1,48 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: gateway
+      POSTGRES_PASSWORD: gatewaypass
+      POSTGRES_DB: gateway
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gateway"]
+      interval: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 10
+
+  gateway:
+    build: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      GATEWAY_ROOT_TOKEN: ${GATEWAY_ROOT_TOKEN:?set GATEWAY_ROOT_TOKEN before running compose up}
+      GATEWAY_MASTER_KEY: ${GATEWAY_MASTER_KEY:?set GATEWAY_MASTER_KEY before running compose up}
+      OPENAI_API_KEY: ${OPENAI_API_KEY-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY-}
+      RUST_LOG: ${RUST_LOG:-info,sqlx::query=warn}
+    volumes:
+      - ./config:/app/config:ro
+    ports:
+      - "8080:8080"
+    command: ["--config", "/app/config/example.standard.yaml"]
+
+volumes:
+  pgdata:
+  redisdata:

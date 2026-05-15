@@ -1,0 +1,29 @@
+[package]
+name = "gateway-storage"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+tokio.workspace = true
+async-trait.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+bytes.workspace = true
+sqlx.workspace = true
+dashmap.workspace = true
+once_cell.workspace = true
+hex.workspace = true
+metrics.workspace = true
+moka.workspace = true
+redis.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"] }
+tempfile = "3.10"

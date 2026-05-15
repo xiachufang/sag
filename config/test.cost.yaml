@@ -1,0 +1,33 @@
+server:
+  bind: 127.0.0.1:8080
+  default_project_id: default
+
+storage:
+  profile: lite
+  sqlite:
+    path: ./data/gateway-cost.db
+
+admin:
+  root_token_env: GATEWAY_ROOT_TOKEN
+
+providers:
+  openai:
+    base_url: http://127.0.0.1:18181
+    credential_ref: env://OPENAI_API_KEY
+
+routes:
+  - primary: { provider: openai }
+    cache: { enabled: false, ttl: 0 }
+    retry: { max_attempts: 1, initial_backoff_ms: 100 }
+
+limits: []
+
+# Very tight budget so we can prove the block path fires.
+budgets:
+  - name: tight-budget
+    target: { project_id: default }
+    period: daily
+    amount_usd: 0.0001
+    thresholds:
+      - { at: 0.5, action: notify }
+      - { at: 1.0, action: block }
