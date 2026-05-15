@@ -80,7 +80,7 @@ increase(gateway_budget_threshold_total{action="block"}[1h]) > 0
     "request_id": "req_...",
     "project_id": "default",
     "gateway_key_id": "key_...",
-    "provider": "openai",
+    "namespace": "openai",
     "model": "gpt-4o-mini",
     "status": 200,
     "input_tokens": 12,
@@ -107,7 +107,7 @@ increase(gateway_budget_threshold_total{action="block"}[1h]) > 0
 | --- | --- | --- |
 | `id` | string | `log_xxx`,响应头 `X-Gateway-Request-Id` 返回的就是它。 |
 | `project_id` / `gateway_key_id` | string | 归属。 |
-| `provider` / `model` / `path` | string | 上游信息。 |
+| `namespace` / `model` / `path` | string | 路由信息(`namespace` 来自 URL `/v1/{namespace}/...` 段)。 |
 | `status` | string | `ok` / `gateway_error` / `upstream_error`。 |
 | `http_status` | int | 实际返回客户端的状态码。 |
 | `error` | string? | 错误码字符串(如 `budget_exceeded`、`rate_limited`)。 |

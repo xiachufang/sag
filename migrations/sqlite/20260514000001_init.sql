@@ -60,7 +60,7 @@ CREATE TABLE request_logs (
     id                 TEXT PRIMARY KEY,
     project_id         TEXT NOT NULL,
     gateway_key_id     TEXT,
-    provider           TEXT,
+    namespace          TEXT,
     model              TEXT,
     endpoint           TEXT,
     request_ts         INTEGER NOT NULL,
@@ -88,13 +88,13 @@ CREATE TABLE request_logs (
 CREATE INDEX idx_logs_ts        ON request_logs(request_ts DESC);
 CREATE INDEX idx_logs_key_ts    ON request_logs(gateway_key_id, request_ts DESC);
 CREATE INDEX idx_logs_status_ts ON request_logs(status, request_ts DESC);
-CREATE INDEX idx_logs_provider_model_ts ON request_logs(provider, model, request_ts DESC);
+CREATE INDEX idx_logs_namespace_model_ts ON request_logs(namespace, model, request_ts DESC);
 
 -- Pre-aggregated request logs (hourly)
 CREATE TABLE request_logs_hourly (
     project_id           TEXT NOT NULL,
     gateway_key_id       TEXT NOT NULL DEFAULT '',
-    provider             TEXT NOT NULL DEFAULT '',
+    namespace            TEXT NOT NULL DEFAULT '',
     model                TEXT NOT NULL DEFAULT '',
     hour                 INTEGER NOT NULL,
     requests             INTEGER NOT NULL,
@@ -102,7 +102,7 @@ CREATE TABLE request_logs_hourly (
     completion_tokens    INTEGER NOT NULL,
     cost_usd             REAL NOT NULL,
     cached_savings_usd   REAL NOT NULL,
-    PRIMARY KEY (project_id, gateway_key_id, provider, model, hour)
+    PRIMARY KEY (project_id, gateway_key_id, namespace, model, hour)
 );
 
 -- Budgets

@@ -63,7 +63,7 @@ impl LogStore for SqliteLogStore {
         let limit = if q.limit == 0 { 50 } else { q.limit.min(500) };
         let mut qb: QueryBuilder<Sqlite> = QueryBuilder::new(
             r#"
-            SELECT id, project_id, gateway_key_id, provider, model, endpoint,
+            SELECT id, project_id, gateway_key_id, namespace, model, endpoint,
                    request_ts, duration_ms, status, http_status, cached, retry_count,
                    prompt_tokens, completion_tokens, cost_usd
               FROM request_logs WHERE 1=1
@@ -76,8 +76,8 @@ impl LogStore for SqliteLogStore {
         if let Some(v) = &q.gateway_key_id {
             qb.push(" AND gateway_key_id = ").push_bind(v.clone());
         }
-        if let Some(v) = &q.provider {
-            qb.push(" AND provider = ").push_bind(v.clone());
+        if let Some(v) = &q.namespace {
+            qb.push(" AND namespace = ").push_bind(v.clone());
         }
         if let Some(v) = &q.model {
             qb.push(" AND model = ").push_bind(v.clone());
@@ -114,7 +114,7 @@ impl LogStore for SqliteLogStore {
                 id: r.get("id"),
                 project_id: r.get("project_id"),
                 gateway_key_id: r.get("gateway_key_id"),
-                provider: r.get("provider"),
+                namespace: r.get("namespace"),
                 model: r.get("model"),
                 endpoint: r.get("endpoint"),
                 request_ts: r.get("request_ts"),
@@ -156,7 +156,7 @@ impl LogStore for SqliteLogStore {
             id: r.get("id"),
             project_id: r.get("project_id"),
             gateway_key_id: r.get("gateway_key_id"),
-            provider: r.get("provider"),
+            namespace: r.get("namespace"),
             model: r.get("model"),
             endpoint: r.get("endpoint"),
             request_ts: r.get("request_ts"),
@@ -191,7 +191,7 @@ impl LogStore for SqliteLogStore {
 
         for dim in &q.group_by {
             let (sel, group) = match dim {
-                AggregateDimension::Provider => ("provider AS dim_provider", "provider"),
+                AggregateDimension::Namespace => ("namespace AS dim_namespace", "namespace"),
                 AggregateDimension::Model => ("model AS dim_model", "model"),
                 AggregateDimension::GatewayKey => {
                     ("gateway_key_id AS dim_gateway_key", "gateway_key_id")
@@ -242,10 +242,10 @@ impl LogStore for SqliteLogStore {
             let mut key = serde_json::Map::new();
             for dim in &q.group_by {
                 match dim {
-                    AggregateDimension::Provider => {
+                    AggregateDimension::Namespace => {
                         key.insert(
-                            "provider".into(),
-                            r.try_get::<Option<String>, _>("dim_provider")
+                            "namespace".into(),
+                            r.try_get::<Option<String>, _>("dim_namespace")
                                 .ok()
                                 .flatten()
                                 .map(serde_json::Value::String)
@@ -382,7 +382,7 @@ async fn flush_batch(
     let mut qb: QueryBuilder<Sqlite> = QueryBuilder::new(
         r#"
         INSERT INTO request_logs
-            (id, project_id, gateway_key_id, provider, model, endpoint,
+            (id, project_id, gateway_key_id, namespace, model, endpoint,
              request_ts, duration_ms, upstream_ms, ttfb_ms,
              status, http_status, cached, retry_count, fallback_used,
              prompt_tokens, completion_tokens, cached_tokens, total_tokens,
@@ -399,7 +399,7 @@ async fn flush_batch(
         b.push_bind(rec.id)
             .push_bind(rec.project_id)
             .push_bind(rec.gateway_key_id)
-            .push_bind(rec.provider)
+            .push_bind(rec.namespace)
             .push_bind(rec.model)
             .push_bind(rec.endpoint)
             .push_bind(rec.request_ts)

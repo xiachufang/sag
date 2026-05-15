@@ -67,7 +67,7 @@ pub struct RequestLogRecord {
     pub id: String,
     pub project_id: String,
     pub gateway_key_id: Option<String>,
-    pub provider: Option<String>,
+    pub namespace: Option<String>,
     pub model: Option<String>,
     pub endpoint: Option<String>,
     pub request_ts: Timestamp,
@@ -98,7 +98,7 @@ pub struct RequestLogRow {
     pub id: String,
     pub project_id: String,
     pub gateway_key_id: Option<String>,
-    pub provider: Option<String>,
+    pub namespace: Option<String>,
     pub model: Option<String>,
     pub endpoint: Option<String>,
     pub request_ts: Timestamp,
@@ -122,7 +122,7 @@ pub struct RequestLogDetail {
 pub struct LogQuery {
     pub project_id: Option<String>,
     pub gateway_key_id: Option<String>,
-    pub provider: Option<String>,
+    pub namespace: Option<String>,
     pub model: Option<String>,
     pub status: Option<String>,
     pub from_ts: Option<Timestamp>,
@@ -154,7 +154,7 @@ pub struct AggregateQuery {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AggregateDimension {
-    Provider,
+    Namespace,
     Model,
     Day,
     Hour,

@@ -14,7 +14,7 @@ simple-ai-gateway 是单二进制 (`gateway`) 的 Rust 程序,内部分为四个
 
 ## 请求生命周期
 
-一次代理请求(`/v1/{provider}/...`)经过的环节,按顺序:
+一次代理请求(`/v1/{namespace}/...`)经过的环节,按顺序:
 
 1. **认证** (`auth.rs`) — 从 `Authorization` 头取 Gateway Key,BLAKE3 keyed-hash 后查表,常时间对比,核对 `status` 与 `expires_at`。
 2. **读 body** (`routes/proxy.rs`) — 整体读入内存(流式响应除外),计算 blake3 摘要,提取 `model` 字段。

@@ -233,7 +233,7 @@
 | --- | --- | --- |
 | `project_id` | string | 按项目过滤。 |
 | `gateway_key_id` | string | 按 Key 过滤。 |
-| `provider` | string | 按供应商过滤。 |
+| `namespace` | string | 按 URL namespace 过滤(对应 `/v1/{namespace}/...` 段)。 |
 | `model` | string | 按模型名过滤(精确)。 |
 | `status` | string | `ok` / `gateway_error` / `upstream_error`。 |
 | `from` / `to` | int | unix 秒,时间范围。 |
@@ -279,7 +279,7 @@
 | --- | --- |
 | `project_id` | 限定项目。 |
 | `from` / `to` | 时间范围(unix 秒)。 |
-| `group_by` | `provider` / `model` / `gateway_key_id` / `day` 之一。 |
+| `group_by` | `namespace` / `model` / `gateway_key_id` / `day` 之一(或逗号分隔的组合)。 |
 
 响应:
 

@@ -32,7 +32,7 @@ const MAX_CACHEABLE_BODY_BYTES: usize = 2 * 1024 * 1024; // 2 MB cap on cache wr
 pub async fn proxy_handler(
     State(state): State<AppState>,
     principal: GatewayKeyPrincipal,
-    Path((provider, tail)): Path<(String, String)>,
+    Path((namespace, tail)): Path<(String, String)>,
     headers: HeaderMap,
     method: Method,
     body: Body,
@@ -47,7 +47,7 @@ pub async fn proxy_handler(
 
     let mut log = LogBuilder::new(
         principal.project_id.clone(),
-        Some(provider.clone()),
+        Some(namespace.clone()),
         Some(upstream_path.clone()),
     );
     log.set_gateway_key(Some(principal.key_id.clone()));
@@ -94,10 +94,10 @@ pub async fn proxy_handler(
     // Resolve the route for this URL namespace. The chain falls back to
     // a primary-only chain when no explicit route is defined; in that
     // case the URL namespace doubles as the upstream provider key.
-    let route = find_route(&config, &provider, request_model.as_deref());
+    let route = find_route(&config, &namespace, request_model.as_deref());
     let chain = match &route {
         Some(r) => ProviderChain::from_route(r),
-        None => ProviderChain::primary_only(&provider),
+        None => ProviderChain::primary_only(&namespace),
     };
 
     // Parse caching policy from route + request headers.
@@ -112,12 +112,12 @@ pub async fn proxy_handler(
     // Compute fingerprint up front so we can use it for both lookup and
     // writeback.
     let fp = fingerprint(&FingerprintInputs {
-        provider: &provider,
+        namespace: &namespace,
         endpoint: &upstream_path,
         body: &body_bytes,
-        namespace: cache_policy.as_ref().and_then(|p| p.namespace.as_deref()),
+        cache_scope: cache_policy.as_ref().and_then(|p| p.cache_scope.as_deref()),
     });
-    let cache_key = format!("resp:{provider}:{fp}");
+    let cache_key = format!("resp:{namespace}:{fp}");
 
     // Cache lookup (unless bypassed/refresh).
     let (cache_status, lookup_result) = match cache_policy.as_ref() {
@@ -159,10 +159,15 @@ pub async fn proxy_handler(
             usage.total_tokens(),
         );
         let mut would_have = None;
+        // For cache hits we don't know which upstream actually originally served;
+        // best effort is the route's primary, falling back to the namespace.
+        let upstream_for_pricing = route
+            .map(|r| r.primary.provider.as_str())
+            .unwrap_or(namespace.as_str());
         if let Some(model) = log.model().map(str::to_string) {
             if let Some(bd) = gateway_core::pricing::compute_cost(
                 &state.pricing,
-                &provider,
+                upstream_for_pricing,
                 &model,
                 gateway_core::pricing::TokenUsage {
                     prompt: usage.prompt.unwrap_or(0),
@@ -190,8 +195,11 @@ pub async fn proxy_handler(
         return Err(ApiError::Gateway(GatewayError::UpstreamTimeout));
     }
 
+    // template.provider gets overwritten by each chain entry during execute_chain;
+    // the value we put here is just a default and only matters when the chain is
+    // empty (which doesn't happen — primary_only always has one entry).
     let template = ForwardRequest {
-        provider: provider.clone(),
+        provider: namespace.clone(),
         path: upstream_path,
         query: None,
         method,
@@ -239,7 +247,14 @@ pub async fn proxy_handler(
     let budgets = state.budgets.clone();
     let project_id = principal.project_id.clone();
     let key_id = principal.key_id.clone();
-    let provider_name = provider.clone();
+    let namespace_label = namespace.clone();
+    // Real upstream provider used for the successful (or last-tried) attempt;
+    // needed for pricing lookup once namespace and primary.provider can differ.
+    let upstream_provider = result
+        .fallback_used
+        .clone()
+        .or_else(|| route.map(|r| r.primary.provider.clone()))
+        .unwrap_or_else(|| namespace.clone());
     let mut response_capture = BytesMut::new();
     let mut response_truncated = false;
     let mut log_holder = Some(log);
@@ -356,7 +371,7 @@ pub async fn proxy_handler(
                 };
                 if let Some(bd) = gateway_core::pricing::compute_cost(
                     &pricing,
-                    &provider_name,
+                    &upstream_provider,
                     &model,
                     pricing_usage,
                 ) {
@@ -364,7 +379,7 @@ pub async fn proxy_handler(
                     budgets.record_cost(&project_id, &key_id, bd.cost_usd).await;
                     metrics::counter!(
                         "gateway_cost_total_usd_micro",
-                        "provider" => provider_name.clone(),
+                        "namespace" => namespace_label.clone(),
                         "model" => model.clone()
                     )
                     .increment((bd.cost_usd * 1_000_000.0) as u64);

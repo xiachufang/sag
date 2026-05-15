@@ -5,11 +5,11 @@
 ## 路径形态
 
 ```
-/v1/{provider}/{...upstream_path}
+/v1/{namespace}/{...upstream_path}
 ```
 
-- `{provider}` 必须在 `providers` 配置中存在(如 `openai`、`anthropic`)。
-- `{...upstream_path}` 原样拼到 `providers.{name}.base_url` 后。
+- `{namespace}` 是 route 的对外别名。可以与某个 `providers` 表里的 key 同名(常见 1:1 配法,无需写 `match.namespace`),也可以独立命名,通过 `match.namespace` 显式绑定到一个 provider(透明迁移场景)。
+- `{...upstream_path}` 原样拼到命中的 provider 的 `base_url` 后。
 
 例如:
 
@@ -97,7 +97,7 @@ Authorization: Bearer sk-gw-live-xxxxxxxxxxxx
 | --- | --- |
 | `401` | 缺少 `Authorization` 或 Key 无效 / 已撤销 / 已过期。 |
 | `402` | 命中 `budgets[].thresholds[].action: block`。 |
-| `404` | URL 中的 `{provider}` 未配置。 |
+| `404` | URL 中的 `{namespace}` 没有对应的 route,且 `providers` 表里也没有同名 key。 |
 | `408` | 请求超时(`server.request_timeout_ms` 触发)。 |
 | `429` | 命中 `limits[]` 中的 RPM / TPM / 并发上限。 |
 | `502` | 上游所有重试 + fallback 都失败。 |

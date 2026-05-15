@@ -12,13 +12,13 @@ pub struct LogBuilder {
 }
 
 impl LogBuilder {
-    pub fn new(project_id: String, provider: Option<String>, endpoint: Option<String>) -> Self {
+    pub fn new(project_id: String, namespace: Option<String>, endpoint: Option<String>) -> Self {
         Self {
             rec: RequestLogRecord {
                 id: Uuid::now_v7().to_string(),
                 project_id,
                 gateway_key_id: None,
-                provider,
+                namespace,
                 model: None,
                 endpoint,
                 request_ts: Utc::now().timestamp_millis(),

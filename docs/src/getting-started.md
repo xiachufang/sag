@@ -78,7 +78,7 @@ curl -X POST http://localhost:8080/admin/keys \
 
 ## 4. 调一次模型
 
-把 Gateway Key 当成上游 API Key 用,路径前加 `/v1/{provider}`:
+把 Gateway Key 当成上游 API Key 用,路径前加 `/v1/{namespace}`(namespace 通常就是 provider 名,除非你显式解耦):
 
 ```sh
 curl http://localhost:8080/v1/openai/v1/chat/completions \

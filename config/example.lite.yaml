@@ -21,15 +21,18 @@ providers:
   openai:
     base_url: https://api.openai.com
     credential_ref: env://OPENAI_API_KEY
+  doubao:
+    base_url: https://ark.cn-beijing.volces.com/api/v3
+    credential_ref: env://DOUBAO_API_KEY
   anthropic:
     base_url: https://api.anthropic.com
     credential_ref: env://ANTHROPIC_API_KEY
 
 routes:
   - match:
-      model_prefix: gpt-
+      namespace: audiobook
     primary:
-      provider: openai
+      provider: doubao
     cache:
       enabled: true
       ttl: 3600
@@ -37,9 +40,8 @@ routes:
       max_attempts: 3
       initial_backoff_ms: 500
     fallbacks:
-      - provider: anthropic
+      - provider: openai
         trigger: [upstream_5xx, timeout]
-
 limits:
   - target: { type: key, id: "*" }
     rpm: 1000

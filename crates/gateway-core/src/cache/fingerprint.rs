@@ -22,12 +22,14 @@ const CACHE_FIELDS: &[&str] = &[
 
 /// Inputs to fingerprint a cacheable request.
 pub struct FingerprintInputs<'a> {
-    pub provider: &'a str,
+    /// URL namespace (the `{X}` segment in `/v1/{X}/...`). Scopes the cache
+    /// per public route alias.
+    pub namespace: &'a str,
     pub endpoint: &'a str,
     pub body: &'a [u8],
-    /// Optional namespace bumper supplied by the caller via header (so
+    /// Optional cache-key bumper supplied by the caller via header (so
     /// users can force a fresh key without changing the body).
-    pub namespace: Option<&'a str>,
+    pub cache_scope: Option<&'a str>,
 }
 
 /// Compute a deterministic blake3 hex digest for the cacheable subset of
@@ -35,12 +37,12 @@ pub struct FingerprintInputs<'a> {
 /// the cache layer can be applied uniformly.
 pub fn fingerprint(inp: &FingerprintInputs<'_>) -> String {
     let mut hasher = blake3::Hasher::new();
-    hasher.update(inp.provider.as_bytes());
+    hasher.update(inp.namespace.as_bytes());
     hasher.update(b"|");
     hasher.update(inp.endpoint.as_bytes());
     hasher.update(b"|");
-    if let Some(ns) = inp.namespace {
-        hasher.update(ns.as_bytes());
+    if let Some(s) = inp.cache_scope {
+        hasher.update(s.as_bytes());
     }
     hasher.update(b"|");
 
@@ -121,16 +123,16 @@ mod tests {
     fn same_inputs_same_fingerprint() {
         let body = br#"{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hi"}],"temperature":0}"#;
         let a = fingerprint(&FingerprintInputs {
-            provider: "openai",
+            namespace: "openai",
             endpoint: "/v1/chat/completions",
             body,
-            namespace: None,
+            cache_scope: None,
         });
         let b = fingerprint(&FingerprintInputs {
-            provider: "openai",
+            namespace: "openai",
             endpoint: "/v1/chat/completions",
             body,
-            namespace: None,
+            cache_scope: None,
         });
         assert_eq!(a, b);
     }
@@ -140,16 +142,16 @@ mod tests {
         let b1 = br#"{"model":"gpt-4o","messages":[{"role":"user","content":"hi"}],"user":"u1"}"#;
         let b2 = br#"{"model":"gpt-4o","messages":[{"role":"user","content":"hi"}],"user":"u2"}"#;
         let a = fingerprint(&FingerprintInputs {
-            provider: "openai",
+            namespace: "openai",
             endpoint: "/v1/chat/completions",
             body: b1,
-            namespace: None,
+            cache_scope: None,
         });
         let b = fingerprint(&FingerprintInputs {
-            provider: "openai",
+            namespace: "openai",
             endpoint: "/v1/chat/completions",
             body: b2,
-            namespace: None,
+            cache_scope: None,
         });
         assert_eq!(a, b);
     }
@@ -161,16 +163,16 @@ mod tests {
         let b2 =
             br#"{"model":"gpt-4o","messages":[{"role":"user","content":"hi"}],"temperature":0.7}"#;
         let a = fingerprint(&FingerprintInputs {
-            provider: "openai",
+            namespace: "openai",
             endpoint: "/v1/chat/completions",
             body: b1,
-            namespace: None,
+            cache_scope: None,
         });
         let b = fingerprint(&FingerprintInputs {
-            provider: "openai",
+            namespace: "openai",
             endpoint: "/v1/chat/completions",
             body: b2,
-            namespace: None,
+            cache_scope: None,
         });
         assert_ne!(a, b);
     }

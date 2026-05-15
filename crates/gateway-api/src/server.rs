@@ -69,7 +69,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/healthz", get(health::healthz))
         .route("/readyz", get(health::readyz))
         .route("/metrics", get(metrics::metrics_handler))
-        .route("/v1/:provider/*tail", any(proxy::proxy_handler))
+        .route("/v1/:namespace/*tail", any(proxy::proxy_handler))
         .nest("/admin", admin)
         .layer(TraceLayer::new_for_http())
         .with_state(state)

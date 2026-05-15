@@ -124,7 +124,7 @@ storage:
 
 ## `providers`
 
-`map<string, ProviderConfig>`,key 是供应商名(被 `routes` 和路径 `/v1/{provider}/*` 引用)。
+`map<string, ProviderConfig>`,key 是上游身份名(被 `routes[].primary.provider` 和 `fallbacks[].provider` 引用)。URL `/v1/{namespace}/*` 中的 `namespace` 是另一个独立概念,默认与该 key 同名,可通过 `match.namespace` 解耦。
 
 ```yaml
 providers:

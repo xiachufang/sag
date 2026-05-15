@@ -15,7 +15,7 @@ pub struct ListLogsQuery {
     #[serde(default)]
     pub gateway_key_id: Option<String>,
     #[serde(default)]
-    pub provider: Option<String>,
+    pub namespace: Option<String>,
     #[serde(default)]
     pub model: Option<String>,
     #[serde(default)]
@@ -45,7 +45,7 @@ pub async fn list_logs(
     let lq = LogQuery {
         project_id,
         gateway_key_id: q.gateway_key_id,
-        provider: q.provider,
+        namespace: q.namespace,
         model: q.model,
         status: q.status,
         from_ts: q.from,

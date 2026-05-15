@@ -41,7 +41,9 @@ impl CacheStatus {
 pub struct CachePolicy {
     pub directive: CacheDirective,
     pub ttl: Duration,
-    pub namespace: Option<String>,
+    /// Optional user-supplied cache-key bumper (header `X-Gateway-Cache-Scope`),
+    /// distinct from the URL namespace used to scope the route itself.
+    pub cache_scope: Option<String>,
     pub allow_nondeterministic: bool, // X-Gateway-Cache-Force
 }
 
@@ -73,8 +75,8 @@ impl CachePolicy {
             .and_then(|v| v.parse::<u64>().ok())
             .map(Duration::from_secs)
             .unwrap_or(default_ttl);
-        let namespace = headers
-            .get("x-gateway-cache-namespace")
+        let cache_scope = headers
+            .get("x-gateway-cache-scope")
             .and_then(|v| v.to_str().ok())
             .map(|s| s.to_string());
         let allow_nondeterministic = headers
@@ -85,7 +87,7 @@ impl CachePolicy {
         Some(Self {
             directive,
             ttl,
-            namespace,
+            cache_scope,
             allow_nondeterministic,
         })
     }

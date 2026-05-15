@@ -275,9 +275,9 @@ impl LogStore for MemoryLogStore {
             .iter()
             .filter(|r| {
                 q.project_id.as_deref().map_or(true, |p| p == r.project_id)
-                    && q.provider
+                    && q.namespace
                         .as_deref()
-                        .map_or(true, |p| r.provider.as_deref() == Some(p))
+                        .map_or(true, |p| r.namespace.as_deref() == Some(p))
                     && q.model
                         .as_deref()
                         .map_or(true, |m| r.model.as_deref() == Some(m))
@@ -289,7 +289,7 @@ impl LogStore for MemoryLogStore {
                 id: r.id.clone(),
                 project_id: r.project_id.clone(),
                 gateway_key_id: r.gateway_key_id.clone(),
-                provider: r.provider.clone(),
+                namespace: r.namespace.clone(),
                 model: r.model.clone(),
                 endpoint: r.endpoint.clone(),
                 request_ts: r.request_ts,
