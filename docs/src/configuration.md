@@ -148,47 +148,46 @@ providers:
 
 ## `routes`
 
-每条路由给一个 provider 绑定代理策略(缓存、重试、回退)。按数组顺序匹配,**第一条同时满足以下三个条件**的命中:
+每条路由把"哪些请求"绑定到"上游身份和代理策略(缓存、重试、回退)"。按数组顺序匹配,**第一条同时满足以下条件**的命中:
 
-1. `primary.provider` 与 URL 中的 `{provider}` 相等;
-2. 若 `match.path` 有值,请求路径(`/v1/{provider}/...` 全路径)按规则匹配;
-3. 若 `match.model_prefix` 有值,请求体里的 `model` 字段以该前缀开头。
+1. URL 中的 `/v1/{namespace}/...` 段等于 `match.namespace`(若未设置,默认等于 `primary.provider`);
+2. 若 `match.model_prefix` 有值,请求体里的 `model` 字段以该前缀开头。
+
+注意:**`namespace`(URL 段)与 `primary.provider`(`providers` 表里的 key)是两个独立概念**。命名相同是约定,不是要求。让它们不同,就能实现"客户端继续叫 `/v1/openai/...`,但后端偷偷转发给 azure"这类场景。
 
 ```yaml
+providers:
+  openai:                          # 上游身份:实际网络目的地 + 凭证
+    base_url: https://api.openai.com
+    credential_ref: env://OPENAI_API_KEY
+  azure-prod:
+    base_url: https://prod.openai.azure.com
+    credential_ref: env://AZURE_KEY
+
 routes:
-  # 给 chat 路径加 1 小时缓存,只对 gpt- 系列模型生效
+  # 透明迁移:客户端用的还是 /v1/openai/...,网关后端走 azure
   - match:
-      path: /v1/openai/v1/chat/*
+      namespace: openai
       model_prefix: gpt-
     primary:
-      provider: openai
-      model: gpt-4o-mini      # 可选,改写模型
-    cache:
-      enabled: true
-      ttl: 3600
-    retry:
-      max_attempts: 3
-      initial_backoff_ms: 500
-    fallbacks:
-      - provider: anthropic
-        model: claude-3-5-sonnet
-        trigger: [upstream_5xx, timeout]
+      provider: azure-prod         # ← 与 namespace 不同
+    cache: { enabled: true, ttl: 3600 }
 
-  # 兜底:其他 openai 请求(embeddings 等),没有缓存
+  # 兜底:其他 openai 请求(o1- 等)继续走真正的 OpenAI,默认无缓存
   - primary:
-      provider: openai
+      provider: openai             # ← namespace 默认等于 "openai"
 ```
 
-**没有匹配的路由(或 `routes: []`)时**:走 `ProviderChain::primary_only`,仅有主供应商、默认重试参数(`max_attempts: 3`, `initial_backoff_ms: 500`)、**缓存禁用**、**无 fallback**。等价于"裸代理 + 默认重试"。
+**没有匹配的路由(或 `routes: []`)时**:走 `ProviderChain::primary_only`,把 URL 段当作上游 provider 名字直接用 —— 等价于"裸代理 + 默认重试 3 次 + 缓存禁用 + 无 fallback"。前提是 `providers` 表里得有同名的 key,否则上游调用会失败。
 
 ### `match`
 
 | 字段 | 默认 | 说明 |
 | --- | --- | --- |
-| `path` | `None` | 请求路径模式。末尾 `*` 表示"前缀匹配",无 `*` 表示精确匹配。例:`/v1/openai/*` 匹配该前缀下所有路径,`/v1/openai/v1/models` 仅匹配该路径。**对比的是完整外部路径**,包括 `/v1/{provider}/` 前缀。 |
+| `namespace` | `primary.provider` | URL `/v1/{namespace}/...` 段。**不是 `providers` 表的 key**,只是对外暴露的别名。未设置时默认与 `primary.provider` 同名,保留"一对一映射"的常见配法。 |
 | `model_prefix` | `None` | 请求体 `model` 字段的字符串前缀。例:`gpt-` 匹配 `gpt-4o-mini`、`gpt-3.5-turbo` 等。若设置了 `model_prefix` 但请求没有 `model` 字段(GET /v1/models 等),视为不匹配。 |
 
-两个字段都不写 → 只看 `primary.provider`,该 provider 的所有请求都命中。两者都写 → AND 关系。如果同一 provider 配多套策略,把更具体的放在数组前面,兜底的放后面。
+如果同一 namespace 配多套策略,把更具体的放在数组前面,兜底的放后面。
 
 ### `primary` / `fallbacks` (RouteTarget)
 

@@ -195,8 +195,12 @@ pub struct RouteConfig {
 
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct RouteMatch {
+    /// URL namespace — the `{namespace}` segment in `/v1/{namespace}/...`.
+    /// Conceptually distinct from `primary.provider` (which names an entry
+    /// in the `providers` map). If unset, defaults to `primary.provider`
+    /// so existing configs that didn't decouple the two keep working.
     #[serde(default)]
-    pub path: Option<String>,
+    pub namespace: Option<String>,
     #[serde(default)]
     pub model_prefix: Option<String>,
 }

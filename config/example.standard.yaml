@@ -28,7 +28,6 @@ providers:
 
 routes:
   - match:
-      path: /v1/openai/*
       model_prefix: gpt-
     primary:
       provider: openai

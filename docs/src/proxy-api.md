@@ -64,13 +64,12 @@ Authorization: Bearer sk-gw-live-xxxxxxxxxxxx
 
 ## 路由选择
 
-按数组顺序逐条评估,**第一条同时满足以下三个条件**的路由被选中:
+按数组顺序逐条评估,**第一条同时满足以下条件**的路由被选中:
 
-- `primary.provider` 等于 URL 中的 `{provider}`
-- 若 `match.path` 有值,完整请求路径(`/v1/{provider}/...`)按规则匹配(末尾 `*` = 前缀匹配,否则精确匹配)
+- URL `/v1/{namespace}/...` 段等于 `match.namespace`(未显式设置时,默认取 `primary.provider`)
 - 若 `match.model_prefix` 有值,请求体 `model` 字段以该前缀开头(没有 `model` 字段视为不匹配)
 
-详见 [配置参考 > routes](./configuration.md#routes)。命中后:
+`namespace` 是对外暴露的 URL 段,`primary.provider` 是 `providers` 表里的 key —— 是两个独立概念,允许同一个 namespace 在后端切换到不同 provider。详见 [配置参考 > routes](./configuration.md#routes)。命中后:
 
 1. 检查 `cache.enabled`,且请求体是确定性的(`temperature == 0` 且 `top_p >= 0.999`,或带 `X-Gateway-Cache-Force` 头),则查缓存,命中则直接返回,响应头加 `X-Gateway-Cache-Status: hit`。
 2. 否则按 `primary` 转发,失败重试至 `retry.max_attempts` 次。

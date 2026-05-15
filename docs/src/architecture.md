@@ -20,7 +20,7 @@ simple-ai-gateway 是单二进制 (`gateway`) 的 Rust 程序,内部分为四个
 2. **读 body** (`routes/proxy.rs`) — 整体读入内存(流式响应除外),计算 blake3 摘要,提取 `model` 字段。
 3. **预算检查** (`budget.rs`) — 命中 `action: block` 阈值则直接 402。
 4. **限流** (`ratelimit.rs`) — 按 `limits[]` 配置依次检查 RPM / TPM / 并发。
-5. **路由匹配** — 按数组顺序找第一条满足 `primary.provider == {provider}` 且 `match.path` / `match.model_prefix`(若设置)都命中的路由;没有匹配则用 `ProviderChain::primary_only`(无缓存、无 fallback、默认重试)。`match.path` 支持末尾 `*` 前缀匹配,无 `*` 表示精确匹配;对比的是完整外部路径 `/v1/{provider}/...`。
+5. **路由匹配** — 按数组顺序找第一条满足 `match.namespace == URL段`(未设置时默认 `primary.provider`)且 `match.model_prefix`(若设置)命中的路由。`namespace` 是对外暴露的 URL 段,`primary.provider` 才是 `providers` 表的 key,两者解耦。没有匹配则用 `ProviderChain::primary_only`,把 URL 段直接当作 provider 名(无缓存、无 fallback、默认重试)。
 6. **缓存查找** — 若 `cache.enabled`,以 `(provider, path, body_blake3)` 为 key 查 L1(内存)→ L2(SQLite/Redis)。命中则直接返回,`X-Cache: HIT`。
 7. **构造 forward request** — 改写凭证、Host,追加 `providers.headers`。
 8. **执行链** (`proxy/executor.rs`) — 对 `primary` 尝试 `retry.max_attempts` 次(指数退避);失败若命中 `fallback.trigger` 则切换到下一个 target,直到耗尽。

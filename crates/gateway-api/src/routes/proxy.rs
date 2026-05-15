@@ -91,10 +91,10 @@ pub async fn proxy_handler(
         }
     };
 
-    // Resolve the route for this provider. The chain falls back to a
-    // primary-only chain when no explicit route is defined.
-    let request_path = format!("/v1/{}{}", provider, upstream_path);
-    let route = find_route(&config, &provider, &request_path, request_model.as_deref());
+    // Resolve the route for this URL namespace. The chain falls back to
+    // a primary-only chain when no explicit route is defined; in that
+    // case the URL namespace doubles as the upstream provider key.
+    let route = find_route(&config, &provider, request_model.as_deref());
     let chain = match &route {
         Some(r) => ProviderChain::from_route(r),
         None => ProviderChain::primary_only(&provider),
@@ -415,29 +415,23 @@ pub async fn proxy_handler(
 
 fn find_route<'a>(
     config: &'a AppConfig,
-    provider: &str,
-    request_path: &str,
+    url_namespace: &str,
     model: Option<&str>,
 ) -> Option<&'a RouteConfig> {
     config
         .routes
         .iter()
-        .find(|r| route_matches(r, provider, request_path, model))
+        .find(|r| route_matches(r, url_namespace, model))
 }
 
-fn route_matches(
-    route: &RouteConfig,
-    provider: &str,
-    request_path: &str,
-    model: Option<&str>,
-) -> bool {
-    if route.primary.provider != provider {
+fn route_matches(route: &RouteConfig, url_namespace: &str, model: Option<&str>) -> bool {
+    let expected_ns = route
+        .match_
+        .namespace
+        .as_deref()
+        .unwrap_or(route.primary.provider.as_str());
+    if expected_ns != url_namespace {
         return false;
-    }
-    if let Some(pattern) = route.match_.path.as_deref() {
-        if !path_matches(pattern, request_path) {
-            return false;
-        }
     }
     if let Some(prefix) = route.match_.model_prefix.as_deref() {
         match model {
@@ -446,15 +440,6 @@ fn route_matches(
         }
     }
     true
-}
-
-/// Trailing `*` in the pattern is treated as a wildcard suffix; without it the
-/// match is exact. We don't currently support `*` anywhere else in the pattern.
-fn path_matches(pattern: &str, path: &str) -> bool {
-    match pattern.strip_suffix('*') {
-        Some(prefix) => path.starts_with(prefix),
-        None => path == pattern,
-    }
 }
 
 fn build_cached_response(
@@ -582,14 +567,18 @@ mod route_match_tests {
     use super::*;
     use gateway_core::config::{RouteMatch, RouteTarget};
 
-    fn route(provider: &str, path: Option<&str>, model_prefix: Option<&str>) -> RouteConfig {
+    fn route(
+        primary_provider: &str,
+        namespace: Option<&str>,
+        model_prefix: Option<&str>,
+    ) -> RouteConfig {
         RouteConfig {
             match_: RouteMatch {
-                path: path.map(str::to_string),
+                namespace: namespace.map(str::to_string),
                 model_prefix: model_prefix.map(str::to_string),
             },
             primary: RouteTarget {
-                provider: provider.to_string(),
+                provider: primary_provider.to_string(),
                 model: None,
                 trigger: vec![],
             },
@@ -600,93 +589,37 @@ mod route_match_tests {
     }
 
     #[test]
-    fn path_glob_suffix_matches_prefix() {
-        assert!(path_matches(
-            "/v1/openai/*",
-            "/v1/openai/v1/chat/completions"
-        ));
-        assert!(path_matches("/v1/openai/*", "/v1/openai/"));
-        assert!(path_matches("/v1/openai/*", "/v1/openai/x"));
-    }
-
-    #[test]
-    fn path_glob_does_not_match_other_provider() {
-        assert!(!path_matches("/v1/openai/*", "/v1/anthropic/v1/messages"));
-    }
-
-    #[test]
-    fn path_without_glob_is_exact() {
-        assert!(path_matches("/v1/openai/v1/models", "/v1/openai/v1/models"));
-        assert!(!path_matches(
-            "/v1/openai/v1/models",
-            "/v1/openai/v1/models/abc"
-        ));
-    }
-
-    #[test]
-    fn empty_match_block_matches_anything_for_provider() {
+    fn namespace_defaults_to_primary_provider() {
+        // No explicit match.namespace → use primary.provider as the URL namespace.
         let r = route("openai", None, None);
-        assert!(route_matches(&r, "openai", "/v1/openai/anything", None));
-        assert!(route_matches(
-            &r,
-            "openai",
-            "/v1/openai/x",
-            Some("gpt-4o-mini")
-        ));
+        assert!(route_matches(&r, "openai", None));
+        assert!(!route_matches(&r, "anthropic", None));
     }
 
     #[test]
-    fn provider_mismatch_fails_fast() {
-        let r = route("openai", None, None);
-        assert!(!route_matches(
-            &r,
-            "anthropic",
-            "/v1/anthropic/v1/messages",
-            None
-        ));
+    fn namespace_decouples_from_upstream_provider() {
+        // URL /v1/chatbot/... should hit this route, but it forwards to providers["openai"].
+        let r = route("openai", Some("chatbot"), None);
+        assert!(route_matches(&r, "chatbot", None));
+        assert!(!route_matches(&r, "openai", None));
     }
 
     #[test]
     fn model_prefix_requires_a_model() {
         let r = route("openai", None, Some("gpt-"));
-        assert!(route_matches(
-            &r,
-            "openai",
-            "/v1/openai/anything",
-            Some("gpt-4o-mini")
-        ));
-        assert!(!route_matches(
-            &r,
-            "openai",
-            "/v1/openai/anything",
-            Some("o1-preview")
-        ));
-        assert!(!route_matches(&r, "openai", "/v1/openai/anything", None));
+        assert!(route_matches(&r, "openai", Some("gpt-4o-mini")));
+        assert!(!route_matches(&r, "openai", Some("o1-preview")));
+        assert!(!route_matches(&r, "openai", None));
     }
 
     #[test]
-    fn path_and_model_prefix_combine_as_and() {
-        let r = route("openai", Some("/v1/openai/v1/chat/*"), Some("gpt-"));
-        assert!(route_matches(
-            &r,
-            "openai",
-            "/v1/openai/v1/chat/completions",
-            Some("gpt-4o-mini"),
-        ));
-        // Path miss
-        assert!(!route_matches(
-            &r,
-            "openai",
-            "/v1/openai/v1/embeddings",
-            Some("gpt-4o-mini"),
-        ));
+    fn namespace_and_model_prefix_combine_as_and() {
+        let r = route("openai", Some("chatbot"), Some("gpt-"));
+        assert!(route_matches(&r, "chatbot", Some("gpt-4o-mini")));
+        // Namespace miss
+        assert!(!route_matches(&r, "openai", Some("gpt-4o-mini")));
         // Model miss
-        assert!(!route_matches(
-            &r,
-            "openai",
-            "/v1/openai/v1/chat/completions",
-            Some("o1-preview"),
-        ));
+        assert!(!route_matches(&r, "chatbot", Some("o1-preview")));
     }
 
     #[test]
@@ -703,18 +636,20 @@ mod route_match_tests {
             budgets: vec![],
             observability: Default::default(),
         };
-        // Specific chat-only route first
-        cfg.routes
-            .push(route("openai", Some("/v1/openai/v1/chat/*"), None));
-        // Catch-all fallback
+        // More specific: only matches gpt- models.
+        cfg.routes.push(route("openai", None, Some("gpt-")));
+        // Catch-all for any other openai request.
         cfg.routes.push(route("openai", None, None));
 
-        // Chat request: matches the first.
-        let r = find_route(&cfg, "openai", "/v1/openai/v1/chat/completions", None).unwrap();
-        assert_eq!(r.match_.path.as_deref(), Some("/v1/openai/v1/chat/*"));
+        // gpt-4o-mini hits the specific entry.
+        let r = find_route(&cfg, "openai", Some("gpt-4o-mini")).unwrap();
+        assert_eq!(r.match_.model_prefix.as_deref(), Some("gpt-"));
 
-        // Embeddings request: falls through to the catch-all.
-        let r = find_route(&cfg, "openai", "/v1/openai/v1/embeddings", None).unwrap();
-        assert!(r.match_.path.is_none());
+        // o1-preview falls through to the catch-all.
+        let r = find_route(&cfg, "openai", Some("o1-preview")).unwrap();
+        assert!(r.match_.model_prefix.is_none());
+
+        // Other namespace: no route matches.
+        assert!(find_route(&cfg, "anthropic", Some("gpt-4o-mini")).is_none());
     }
 }
