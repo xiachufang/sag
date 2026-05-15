@@ -148,14 +148,11 @@ providers:
 
 ## `routes`
 
-按顺序匹配,数组元素结构:
+每条路由给一个 provider 绑定代理策略(缓存、重试、回退)。**按 `primary.provider` 匹配**:`/v1/{provider}/*` 中的 `{provider}` 等于 `routes[i].primary.provider` 时命中,取第一条匹配。**`routes` 与请求路径、模型名无关**。
 
 ```yaml
 routes:
-  - match:
-      path: /v1/openai/*
-      model_prefix: gpt-
-    primary:
+  - primary:
       provider: openai
       model: gpt-4o-mini      # 可选,改写模型
     cache:
@@ -170,14 +167,16 @@ routes:
         trigger: [upstream_5xx, timeout]
 ```
 
-### `match`
+**没有匹配的路由(或 `routes: []`)时**:走 `ProviderChain::primary_only`,仅有主供应商、默认重试参数(`max_attempts: 3`, `initial_backoff_ms: 500`)、**缓存禁用**、**无 fallback**。等价于"裸代理 + 默认重试"。
+
+### `match`(字段保留,当前未生效)
 
 | 字段 | 默认 | 说明 |
 | --- | --- | --- |
-| `path` | `None` | 路径前缀或通配 `*`。 |
-| `model_prefix` | `None` | 请求体 `model` 字段的前缀匹配。 |
+| `path` | `None` | 计划用于路径前缀匹配,**当前实现不读取**。 |
+| `model_prefix` | `None` | 计划用于按请求体 `model` 字段前缀分流,**当前实现不读取**。 |
 
-两者都为空表示匹配所有进入此路由表的请求。
+写了不会报错,但也不会改变匹配结果。所有路由匹配只看 `primary.provider`。如果需要给同一 provider 配多套策略,目前只能取数组里第一条。
 
 ### `primary` / `fallbacks` (RouteTarget)
 
@@ -203,7 +202,7 @@ routes:
 | `enabled` | `false` | 是否对该路由启用响应缓存。 |
 | `ttl` | `3600` | 缓存秒数。 |
 
-缓存 key 来自请求体 + 路径的 blake3 摘要;流式响应不缓存。
+缓存 key 来自请求体 + 路径的 blake3 摘要。流式响应**也会被缓存**(replay 时按原 chunk 边界发回),前提是请求体确定性(`temperature == 0` 且 `top_p >= 0.999`)且大小 ≤ 2 MB。
 
 ### `retry`
 

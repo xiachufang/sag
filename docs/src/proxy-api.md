@@ -64,13 +64,15 @@ Authorization: Bearer sk-gw-live-xxxxxxxxxxxx
 
 ## 路由选择
 
-按 `routes` 数组顺序匹配,第一条命中即使用。匹配规则是 `match.path` 通配 + `match.model_prefix` 前缀(都为空表示总命中)。命中后:
+按 URL 中的 `{provider}` 在 `routes` 里找 **`primary.provider` 相等**的第一条(`match.path` / `match.model_prefix` 字段当前不生效,见 [配置参考](./configuration.md#match-字段保留当前未生效))。命中后:
 
 1. 检查 `cache.enabled`,且请求体是确定性的(`temperature == 0` 且 `top_p >= 0.999`,或带 `X-Gateway-Cache-Force` 头),则查缓存,命中则直接返回,响应头加 `X-Gateway-Cache-Status: hit`。
 2. 否则按 `primary` 转发,失败重试至 `retry.max_attempts` 次。
 3. 仍失败且 `trigger` 命中 → 切到下一个 `fallbacks[]`。
 4. 成功响应若满足缓存条件(≤ 2 MB、状态 2xx),写回 KV;流式响应也会缓存,replay 时保留 chunk 边界。
 5. 写日志,返回响应。
+
+**没有匹配的路由时**(或 `routes` 为空),走 `primary_only` 链:仅主供应商、默认重试 3 次/500ms 退避、**缓存禁用**、无 fallback。
 
 ## 响应头
 
