@@ -99,9 +99,15 @@ impl ProxyEngine {
         let mut providers = HashMap::new();
         let env_overrides = HashMap::new();
         for (name, cfg) in &config.providers {
-            let resolved =
-                resolve_provider(name, cfg, &env_overrides, metadata.as_ref(), master_key.as_ref(), project_id)
-                    .await?;
+            let resolved = resolve_provider(
+                name,
+                cfg,
+                &env_overrides,
+                metadata.as_ref(),
+                master_key.as_ref(),
+                project_id,
+            )
+            .await?;
             providers.insert(name.clone(), resolved);
         }
 

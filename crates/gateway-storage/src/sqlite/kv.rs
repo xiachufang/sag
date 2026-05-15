@@ -19,11 +19,7 @@ pub struct SqliteKvStore {
 }
 
 impl SqliteKvStore {
-    pub fn new(
-        pool: SqlitePool,
-        write_lock: Arc<Mutex<()>>,
-        l1_capacity_mb: u64,
-    ) -> Self {
+    pub fn new(pool: SqlitePool, write_lock: Arc<Mutex<()>>, l1_capacity_mb: u64) -> Self {
         // moka counts weight in arbitrary units; map ~1 byte per unit.
         let l1 = Cache::builder()
             .weigher(|_k: &String, v: &Bytes| v.len().min(u32::MAX as usize) as u32)
@@ -72,12 +68,10 @@ impl KvStore for SqliteKvStore {
             metrics::counter!("gateway_cache_hit_total", "tier" => "l1").increment(1);
             return Ok(Some(v));
         }
-        let row = sqlx::query(
-            "SELECT value, expires_at FROM kv_cache WHERE key = ?",
-        )
-        .bind(key)
-        .fetch_optional(&self.pool)
-        .await?;
+        let row = sqlx::query("SELECT value, expires_at FROM kv_cache WHERE key = ?")
+            .bind(key)
+            .fetch_optional(&self.pool)
+            .await?;
         match row {
             Some(r) => {
                 let exp: i64 = r.get("expires_at");

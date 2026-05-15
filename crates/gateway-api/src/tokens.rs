@@ -109,7 +109,8 @@ mod tests {
 
     #[test]
     fn parses_openai_chat() {
-        let body = br#"{"id":"x","usage":{"prompt_tokens":11,"completion_tokens":5,"total_tokens":16}}"#;
+        let body =
+            br#"{"id":"x","usage":{"prompt_tokens":11,"completion_tokens":5,"total_tokens":16}}"#;
         let mut buf = BytesMut::new();
         buf.extend_from_slice(body);
         let u = extract_token_usage(&buf);

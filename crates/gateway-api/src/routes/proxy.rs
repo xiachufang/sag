@@ -102,8 +102,10 @@ pub async fn proxy_handler(
     let cache_policy = route.and_then(|r| {
         CachePolicy::from_headers(&headers, r.cache.enabled, Duration::from_secs(r.cache.ttl))
     });
-    let body_is_cacheable_shape =
-        cache_policy.as_ref().map(|p| p.body_is_cacheable(&body_bytes)).unwrap_or(false);
+    let body_is_cacheable_shape = cache_policy
+        .as_ref()
+        .map(|p| p.body_is_cacheable(&body_bytes))
+        .unwrap_or(false);
 
     // Compute fingerprint up front so we can use it for both lookup and
     // writeback.
@@ -203,8 +205,7 @@ pub async fn proxy_handler(
     let result = execute_chain(&state.proxy, &chain, template).await;
     let forward_ms = forward_started.elapsed().as_millis() as i64;
 
-    let attempts_value =
-        serde_json::to_value(&result.attempts).unwrap_or(serde_json::Value::Null);
+    let attempts_value = serde_json::to_value(&result.attempts).unwrap_or(serde_json::Value::Null);
     log.merge_metadata("attempts", attempts_value);
     log.set_retry(result.attempts.len().saturating_sub(1) as i32);
     if let Some(fb) = result.fallback_used.clone() {
@@ -292,11 +293,7 @@ pub async fn proxy_handler(
                     }
                     if let Some(mut log) = log_holder.take() {
                         log.set_status("upstream_error", Some(status.as_u16() as i32));
-                        log.set_timing(
-                            started.elapsed().as_millis() as i64,
-                            upstream_ms,
-                            ttfb_ms,
-                        );
+                        log.set_timing(started.elapsed().as_millis() as i64, upstream_ms, ttfb_ms);
                         let body_text =
                             captured_body_to_string(&response_capture, response_truncated);
                         log.set_response_body(body_text);
@@ -313,7 +310,9 @@ pub async fn proxy_handler(
                 status: status.as_u16(),
                 headers: headers_for_cache
                     .iter()
-                    .filter_map(|(k, v)| Some((k.as_str().to_string(), v.to_str().ok()?.to_string())))
+                    .filter_map(|(k, v)| {
+                        Some((k.as_str().to_string(), v.to_str().ok()?.to_string()))
+                    })
                     .collect(),
                 chunks: cache_chunks,
                 finished_at_ms: chrono::Utc::now().timestamp_millis(),
@@ -373,11 +372,7 @@ pub async fn proxy_handler(
                 "upstream_error"
             };
             log.set_status(status_class, Some(status.as_u16() as i32));
-            log.set_timing(
-                started.elapsed().as_millis() as i64,
-                upstream_ms,
-                ttfb_ms,
-            );
+            log.set_timing(started.elapsed().as_millis() as i64, upstream_ms, ttfb_ms);
             log.set_token_usage(
                 usage.prompt,
                 usage.completion,
@@ -429,15 +424,17 @@ fn build_cached_response(
         .map(|c| Ok(Bytes::from(c.data)))
         .collect();
     let body = Body::from_stream(stream::iter(chunks));
-    let mut builder = Response::builder()
-        .status(StatusCode::from_u16(cached.status).unwrap_or(StatusCode::OK));
+    let mut builder =
+        Response::builder().status(StatusCode::from_u16(cached.status).unwrap_or(StatusCode::OK));
     for (k, v) in &cached.headers {
         if k.eq_ignore_ascii_case("content-length") || k.eq_ignore_ascii_case("transfer-encoding") {
             continue;
         }
         builder = builder.header(k, v);
     }
-    let mut response = builder.body(body).unwrap_or_else(|_| Response::new(Body::empty()));
+    let mut response = builder
+        .body(body)
+        .unwrap_or_else(|_| Response::new(Body::empty()));
     let age = chrono::Utc::now().timestamp_millis() - cached.finished_at_ms;
     insert_cache_headers(
         response.headers_mut(),
@@ -448,7 +445,12 @@ fn build_cached_response(
     response
 }
 
-fn insert_cache_headers(headers: &mut HeaderMap, status: CacheStatus, key: &str, age_s: Option<u64>) {
+fn insert_cache_headers(
+    headers: &mut HeaderMap,
+    status: CacheStatus,
+    key: &str,
+    age_s: Option<u64>,
+) {
     if let Ok(v) = HeaderValue::from_str(status.as_header()) {
         headers.insert(HeaderName::from_static("x-gateway-cache-status"), v);
     }

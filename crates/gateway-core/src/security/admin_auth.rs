@@ -12,7 +12,7 @@ use crate::security::master_key::MasterKey;
 pub struct AdminTokenClaims {
     pub sub: String, // admin user id
     pub username: String,
-    pub exp: usize,  // unix seconds
+    pub exp: usize, // unix seconds
     pub iat: usize,
 }
 

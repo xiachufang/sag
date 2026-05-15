@@ -45,11 +45,10 @@ pub async fn resolve_credential(
                 GatewayError::Internal(format!("env var {rest} not set for provider credential"))
             })
     } else if let Some(id) = r.strip_prefix("secret://") {
-        let metadata = metadata.ok_or_else(|| {
-            GatewayError::Internal("secret:// requires metadata store".into())
-        })?;
-        let master = master
-            .ok_or_else(|| GatewayError::Internal("secret:// requires master key".into()))?;
+        let metadata = metadata
+            .ok_or_else(|| GatewayError::Internal("secret:// requires metadata store".into()))?;
+        let master =
+            master.ok_or_else(|| GatewayError::Internal("secret:// requires master key".into()))?;
         let creds = metadata
             .list_provider_credentials(project_id)
             .await

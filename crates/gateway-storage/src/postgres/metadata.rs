@@ -178,10 +178,7 @@ impl MetadataStore for PostgresMetadataStore {
         Ok(())
     }
 
-    async fn list_provider_credentials(
-        &self,
-        project_id: &str,
-    ) -> Result<Vec<ProviderCredential>> {
+    async fn list_provider_credentials(&self, project_id: &str) -> Result<Vec<ProviderCredential>> {
         let rows = sqlx::query(
             r#"
             SELECT id, project_id, provider, name, encrypted_key, status, created_at
@@ -218,12 +215,7 @@ impl MetadataStore for PostgresMetadataStore {
         Ok(())
     }
 
-    async fn upsert_routes(
-        &self,
-        project_id: &str,
-        cfg: RoutesConfig,
-        version: i64,
-    ) -> Result<()> {
+    async fn upsert_routes(&self, project_id: &str, cfg: RoutesConfig, version: i64) -> Result<()> {
         let json = serde_json::to_string(&cfg.raw)?;
         sqlx::query(
             r#"

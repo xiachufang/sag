@@ -14,10 +14,7 @@ pub struct TeeStream {
 }
 
 impl TeeStream {
-    pub fn new(
-        inner: BoxStream<'static, std::io::Result<Bytes>>,
-        max_capture: usize,
-    ) -> Self {
+    pub fn new(inner: BoxStream<'static, std::io::Result<Bytes>>, max_capture: usize) -> Self {
         Self {
             inner,
             accumulator: Vec::new(),

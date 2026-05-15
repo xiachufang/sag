@@ -28,7 +28,12 @@ const MASTER_KEY_ENV: &str = "GATEWAY_MASTER_KEY";
 #[command(name = "gateway", version, about = "Simple AI Gateway")]
 struct Cli {
     /// Path to the YAML config file.
-    #[arg(short, long, env = "GATEWAY_CONFIG", default_value = "config/example.lite.yaml")]
+    #[arg(
+        short,
+        long,
+        env = "GATEWAY_CONFIG",
+        default_value = "config/example.lite.yaml"
+    )]
     config: PathBuf,
 }
 
@@ -117,8 +122,7 @@ fn read_admin_token(config: &AppConfig) -> Option<String> {
 
 fn load_master_key() -> Result<MasterKey> {
     match std::env::var(MASTER_KEY_ENV) {
-        Ok(v) => MasterKey::from_base64(&v)
-            .map_err(|e| anyhow!("{MASTER_KEY_ENV} invalid: {e}")),
+        Ok(v) => MasterKey::from_base64(&v).map_err(|e| anyhow!("{MASTER_KEY_ENV} invalid: {e}")),
         Err(_) => Err(anyhow!(
             "{MASTER_KEY_ENV} not set; generate one with `openssl rand -base64 32` and export it"
         )),
@@ -180,7 +184,9 @@ async fn build_stores(config: &AppConfig) -> Result<StoreBundle> {
                 counter,
             })
         }
-        StorageConfig::Standard { postgres, redis, .. } => {
+        StorageConfig::Standard {
+            postgres, redis, ..
+        } => {
             let pg = PostgresBackend::open(&PostgresConfig {
                 url: postgres.url.clone(),
                 max_connections: postgres.max_connections,
@@ -217,12 +223,7 @@ async fn build_stores(config: &AppConfig) -> Result<StoreBundle> {
 }
 
 async fn seed_default_project(stores: &StoreBundle, project_id: &str) -> Result<()> {
-    if stores
-        .metadata
-        .get_project(project_id)
-        .await?
-        .is_none()
-    {
+    if stores.metadata.get_project(project_id).await?.is_none() {
         stores
             .metadata
             .create_project(NewProject {

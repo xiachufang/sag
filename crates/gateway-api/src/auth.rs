@@ -41,7 +41,10 @@ fn extract_bearer(parts: &Parts) -> Option<String> {
 impl FromRequestParts<AppState> for AdminPrincipal {
     type Rejection = ApiError;
 
-    async fn from_request_parts(parts: &mut Parts, state: &AppState) -> Result<Self, Self::Rejection> {
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
         let token = extract_bearer(parts).ok_or(ApiError::Unauthorized)?;
 
         if let Some(root) = state.admin_root_token.as_deref() {
@@ -64,7 +67,10 @@ impl FromRequestParts<AppState> for AdminPrincipal {
 impl FromRequestParts<AppState> for GatewayKeyPrincipal {
     type Rejection = ApiError;
 
-    async fn from_request_parts(parts: &mut Parts, state: &AppState) -> Result<Self, Self::Rejection> {
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
         let token = extract_bearer(parts).ok_or(ApiError::Unauthorized)?;
         let _prefix = parse_gateway_key(&token).ok_or(ApiError::Unauthorized)?;
 

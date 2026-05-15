@@ -48,7 +48,9 @@ pub fn is_retryable_status(status: u16) -> bool {
 
 /// Compute exponential backoff with full jitter. Capped at 10s.
 pub fn backoff_duration(cfg: &RouteRetryConfig, attempt: u32) -> Duration {
-    let base = cfg.initial_backoff_ms.saturating_mul(1u64 << attempt.min(8));
+    let base = cfg
+        .initial_backoff_ms
+        .saturating_mul(1u64 << attempt.min(8));
     let capped = base.min(10_000);
     let jitter = rand::random::<f64>() * capped as f64;
     Duration::from_millis(jitter as u64)

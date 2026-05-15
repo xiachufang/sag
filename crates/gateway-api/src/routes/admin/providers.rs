@@ -77,7 +77,9 @@ pub async fn list_credentials(
     _principal: AdminPrincipal,
     axum::extract::Query(q): axum::extract::Query<ListCredentialsQuery>,
 ) -> Result<Json<Vec<CredentialSummary>>, ApiError> {
-    let project_id = q.project_id.unwrap_or_else(|| state.default_project_id.clone());
+    let project_id = q
+        .project_id
+        .unwrap_or_else(|| state.default_project_id.clone());
     let rows = state
         .stores
         .metadata
@@ -102,6 +104,10 @@ pub async fn delete_credential(
     _principal: AdminPrincipal,
     Path(id): Path<String>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    state.stores.metadata.delete_provider_credential(&id).await?;
+    state
+        .stores
+        .metadata
+        .delete_provider_credential(&id)
+        .await?;
     Ok(Json(serde_json::json!({ "id": id, "status": "deleted" })))
 }

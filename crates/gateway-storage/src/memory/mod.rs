@@ -52,7 +52,11 @@ impl MetadataStore for MemoryMetadataStore {
             name: p.name,
             created_at: now_ms(),
         };
-        self.state.lock().unwrap().projects.insert(p.id, project.clone());
+        self.state
+            .lock()
+            .unwrap()
+            .projects
+            .insert(p.id, project.clone());
         Ok(project)
     }
 
@@ -61,7 +65,14 @@ impl MetadataStore for MemoryMetadataStore {
     }
 
     async fn list_projects(&self) -> Result<Vec<Project>> {
-        Ok(self.state.lock().unwrap().projects.values().cloned().collect())
+        Ok(self
+            .state
+            .lock()
+            .unwrap()
+            .projects
+            .values()
+            .cloned()
+            .collect())
     }
 
     async fn create_key(&self, k: NewGatewayKey) -> Result<GatewayKeyRow> {
@@ -130,10 +141,7 @@ impl MetadataStore for MemoryMetadataStore {
         Ok(())
     }
 
-    async fn list_provider_credentials(
-        &self,
-        project_id: &str,
-    ) -> Result<Vec<ProviderCredential>> {
+    async fn list_provider_credentials(&self, project_id: &str) -> Result<Vec<ProviderCredential>> {
         Ok(self
             .state
             .lock()
@@ -152,12 +160,7 @@ impl MetadataStore for MemoryMetadataStore {
         Ok(())
     }
 
-    async fn upsert_routes(
-        &self,
-        project_id: &str,
-        cfg: RoutesConfig,
-        version: i64,
-    ) -> Result<()> {
+    async fn upsert_routes(&self, project_id: &str, cfg: RoutesConfig, version: i64) -> Result<()> {
         self.state
             .lock()
             .unwrap()
@@ -176,7 +179,14 @@ impl MetadataStore for MemoryMetadataStore {
     }
 
     async fn list_budgets(&self) -> Result<Vec<Budget>> {
-        Ok(self.state.lock().unwrap().budgets.values().cloned().collect())
+        Ok(self
+            .state
+            .lock()
+            .unwrap()
+            .budgets
+            .values()
+            .cloned()
+            .collect())
     }
 
     async fn get_budget(&self, id: &str) -> Result<Option<Budget>> {
@@ -214,7 +224,14 @@ impl MetadataStore for MemoryMetadataStore {
     }
 
     async fn list_admin_users(&self) -> Result<Vec<AdminUser>> {
-        Ok(self.state.lock().unwrap().admins.values().cloned().collect())
+        Ok(self
+            .state
+            .lock()
+            .unwrap()
+            .admins
+            .values()
+            .cloned()
+            .collect())
     }
 
     async fn touch_admin_last_login(&self, id: &str, ts: Timestamp) -> Result<()> {
@@ -258,8 +275,12 @@ impl LogStore for MemoryLogStore {
             .iter()
             .filter(|r| {
                 q.project_id.as_deref().map_or(true, |p| p == r.project_id)
-                    && q.provider.as_deref().map_or(true, |p| r.provider.as_deref() == Some(p))
-                    && q.model.as_deref().map_or(true, |m| r.model.as_deref() == Some(m))
+                    && q.provider
+                        .as_deref()
+                        .map_or(true, |p| r.provider.as_deref() == Some(p))
+                    && q.model
+                        .as_deref()
+                        .map_or(true, |m| r.model.as_deref() == Some(m))
                     && q.status.as_deref().map_or(true, |s| r.status == s)
                     && q.from_ts.map_or(true, |f| r.request_ts >= f)
                     && q.to_ts.map_or(true, |t| r.request_ts <= t)
@@ -308,11 +329,7 @@ impl LogStore for MemoryLogStore {
         let mut prompt = 0i64;
         let mut completion = 0i64;
         for r in g.iter() {
-            if !q
-                .project_id
-                .as_deref()
-                .map_or(true, |p| p == r.project_id)
-            {
+            if !q.project_id.as_deref().map_or(true, |p| p == r.project_id) {
                 continue;
             }
             if !q.from_ts.map_or(true, |f| r.request_ts >= f) {

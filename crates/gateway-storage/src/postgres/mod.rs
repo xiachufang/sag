@@ -26,7 +26,9 @@ impl PostgresBackend {
             .acquire_timeout(std::time::Duration::from_secs(10))
             .connect(&cfg.url)
             .await?;
-        sqlx::migrate!("../../migrations/postgres").run(&pool).await?;
+        sqlx::migrate!("../../migrations/postgres")
+            .run(&pool)
+            .await?;
         Ok(Self { pool })
     }
 

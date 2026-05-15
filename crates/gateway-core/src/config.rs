@@ -347,9 +347,8 @@ impl AppConfig {
     }
 
     pub fn load_from_str(text: &str) -> Result<Self> {
-        let cfg: AppConfig = serde_yaml::from_str(text).map_err(|e| {
-            GatewayError::Internal(format!("failed to parse config yaml: {e}"))
-        })?;
+        let cfg: AppConfig = serde_yaml::from_str(text)
+            .map_err(|e| GatewayError::Internal(format!("failed to parse config yaml: {e}")))?;
         cfg.validate()?;
         Ok(cfg)
     }

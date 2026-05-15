@@ -21,12 +21,7 @@ pub trait MetadataStore: Send + Sync {
     async fn list_provider_credentials(&self, project_id: &str) -> Result<Vec<ProviderCredential>>;
     async fn delete_provider_credential(&self, id: &str) -> Result<()>;
 
-    async fn upsert_routes(
-        &self,
-        project_id: &str,
-        cfg: RoutesConfig,
-        version: i64,
-    ) -> Result<()>;
+    async fn upsert_routes(&self, project_id: &str, cfg: RoutesConfig, version: i64) -> Result<()>;
     async fn load_routes(&self, project_id: &str) -> Result<Option<(RoutesConfig, i64)>>;
 
     async fn upsert_budget(&self, b: Budget) -> Result<()>;

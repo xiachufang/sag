@@ -7,5 +7,6 @@
 .env.local
 node_modules
 dist
+!crates/gateway-ui/dist/
 *.log
 /docs/book

@@ -121,7 +121,10 @@ impl LogBuilder {
     }
 
     pub fn merge_metadata(&mut self, key: &str, value: serde_json::Value) {
-        let entry = self.rec.metadata.get_or_insert_with(|| serde_json::json!({}));
+        let entry = self
+            .rec
+            .metadata
+            .get_or_insert_with(|| serde_json::json!({}));
         if let serde_json::Value::Object(map) = entry {
             map.insert(key.to_string(), value);
         } else {

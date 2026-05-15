@@ -80,7 +80,11 @@ impl BudgetManager {
                 .read_budget(&b.name, period_start)
                 .await
                 .unwrap_or(0.0);
-            let pct = if b.amount_usd > 0.0 { used / b.amount_usd } else { 0.0 };
+            let pct = if b.amount_usd > 0.0 {
+                used / b.amount_usd
+            } else {
+                0.0
+            };
             for t in &b.thresholds {
                 if pct >= t.at && t.action == "block" {
                     return true;
@@ -103,9 +107,12 @@ impl BudgetManager {
                 .incr_budget(&b.name, period_start, cost_usd)
                 .await
                 .unwrap_or(0.0);
-            let pct = if b.amount_usd > 0.0 { used / b.amount_usd } else { 0.0 };
-            metrics::histogram!("gateway_budget_pct", "budget" => b.name.clone())
-                .record(pct);
+            let pct = if b.amount_usd > 0.0 {
+                used / b.amount_usd
+            } else {
+                0.0
+            };
+            metrics::histogram!("gateway_budget_pct", "budget" => b.name.clone()).record(pct);
             for t in &b.thresholds {
                 if pct >= t.at {
                     let bucket = (t.at * 100.0) as u32;
@@ -173,7 +180,11 @@ impl BudgetManager {
                 .read_budget(&b.name, period_start)
                 .await
                 .unwrap_or(0.0);
-            let pct = if b.amount_usd > 0.0 { used / b.amount_usd } else { 0.0 };
+            let pct = if b.amount_usd > 0.0 {
+                used / b.amount_usd
+            } else {
+                0.0
+            };
             let blocked = b
                 .thresholds
                 .iter()
@@ -203,7 +214,8 @@ pub fn period_start_for(period: &str) -> i64 {
             .with_ymd_and_hms(now.year(), now.month(), now.day(), 0, 0, 0)
             .unwrap(),
         "weekly" => {
-            let monday = now.date_naive() - chrono::Duration::days(now.weekday().num_days_from_monday() as i64);
+            let monday = now.date_naive()
+                - chrono::Duration::days(now.weekday().num_days_from_monday() as i64);
             Utc.with_ymd_and_hms(monday.year(), monday.month(), monday.day(), 0, 0, 0)
                 .unwrap()
         }

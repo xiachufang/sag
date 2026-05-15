@@ -156,8 +156,10 @@ mod tests {
 
     #[test]
     fn temperature_change_busts_fingerprint() {
-        let b1 = br#"{"model":"gpt-4o","messages":[{"role":"user","content":"hi"}],"temperature":0}"#;
-        let b2 = br#"{"model":"gpt-4o","messages":[{"role":"user","content":"hi"}],"temperature":0.7}"#;
+        let b1 =
+            br#"{"model":"gpt-4o","messages":[{"role":"user","content":"hi"}],"temperature":0}"#;
+        let b2 =
+            br#"{"model":"gpt-4o","messages":[{"role":"user","content":"hi"}],"temperature":0.7}"#;
         let a = fingerprint(&FingerprintInputs {
             provider: "openai",
             endpoint: "/v1/chat/completions",

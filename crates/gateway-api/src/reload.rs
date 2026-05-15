@@ -75,10 +75,12 @@ fn warn_unsafe_changes(old: &AppConfig, new: &AppConfig) -> String {
         warnings.push("server.bind changed (requires restart)");
     }
     if old.providers.len() != new.providers.len()
-        || old
-            .providers
-            .iter()
-            .any(|(k, v)| new.providers.get(k).map(|n| n.base_url != v.base_url).unwrap_or(true))
+        || old.providers.iter().any(|(k, v)| {
+            new.providers
+                .get(k)
+                .map(|n| n.base_url != v.base_url)
+                .unwrap_or(true)
+        })
     {
         warnings.push("providers changed (proxy engine still uses old credentials until restart)");
     }

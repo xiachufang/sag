@@ -327,11 +327,7 @@ impl LogStore for SqliteLogStore {
     }
 }
 
-async fn batch_worker(
-    pool: SqlitePool,
-    write_lock: Arc<Mutex<()>>,
-    mut rx: mpsc::Receiver<Cmd>,
-) {
+async fn batch_worker(pool: SqlitePool, write_lock: Arc<Mutex<()>>, mut rx: mpsc::Receiver<Cmd>) {
     let mut buf: Vec<RequestLogRecord> = Vec::with_capacity(BATCH_MAX_ROWS);
     let mut ticker = tokio::time::interval(BATCH_FLUSH_INTERVAL);
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);

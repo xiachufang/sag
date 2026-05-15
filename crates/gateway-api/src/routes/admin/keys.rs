@@ -99,7 +99,9 @@ pub async fn list_keys(
     _principal: AdminPrincipal,
     axum::extract::Query(q): axum::extract::Query<ListKeysQuery>,
 ) -> Result<Json<Vec<KeySummary>>, ApiError> {
-    let project_id = q.project_id.unwrap_or_else(|| state.default_project_id.clone());
+    let project_id = q
+        .project_id
+        .unwrap_or_else(|| state.default_project_id.clone());
     let rows = state.stores.metadata.list_keys(&project_id).await?;
     Ok(Json(
         rows.into_iter()

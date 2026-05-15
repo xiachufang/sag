@@ -98,10 +98,7 @@ impl CachePolicy {
         }
         match serde_json::from_slice::<serde_json::Value>(body) {
             Ok(v) => {
-                let temperature = v
-                    .get("temperature")
-                    .and_then(|t| t.as_f64())
-                    .unwrap_or(0.0);
+                let temperature = v.get("temperature").and_then(|t| t.as_f64()).unwrap_or(0.0);
                 let top_p = v.get("top_p").and_then(|t| t.as_f64()).unwrap_or(1.0);
                 temperature == 0.0 && top_p >= 0.999
             }

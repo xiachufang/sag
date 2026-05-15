@@ -138,13 +138,12 @@ impl MetadataStore for SqliteMetadataStore {
     async fn revoke_key(&self, id: &str) -> Result<()> {
         let ts = now_ms();
         let _w = self.write_lock.lock().await;
-        let res = sqlx::query(
-            "UPDATE gateway_keys SET status = 'revoked', revoked_at = ? WHERE id = ?",
-        )
-        .bind(ts)
-        .bind(id)
-        .execute(&self.pool)
-        .await?;
+        let res =
+            sqlx::query("UPDATE gateway_keys SET status = 'revoked', revoked_at = ? WHERE id = ?")
+                .bind(ts)
+                .bind(id)
+                .execute(&self.pool)
+                .await?;
         if res.rows_affected() == 0 {
             return Err(StorageError::NotFound);
         }
@@ -186,10 +185,7 @@ impl MetadataStore for SqliteMetadataStore {
         Ok(())
     }
 
-    async fn list_provider_credentials(
-        &self,
-        project_id: &str,
-    ) -> Result<Vec<ProviderCredential>> {
+    async fn list_provider_credentials(&self, project_id: &str) -> Result<Vec<ProviderCredential>> {
         let rows = sqlx::query(
             r#"
             SELECT id, project_id, provider, name, encrypted_key, status, created_at
@@ -227,12 +223,7 @@ impl MetadataStore for SqliteMetadataStore {
         Ok(())
     }
 
-    async fn upsert_routes(
-        &self,
-        project_id: &str,
-        cfg: RoutesConfig,
-        version: i64,
-    ) -> Result<()> {
+    async fn upsert_routes(&self, project_id: &str, cfg: RoutesConfig, version: i64) -> Result<()> {
         let json = serde_json::to_string(&cfg.raw)?;
         let updated_at = now_ms();
         let _w = self.write_lock.lock().await;
