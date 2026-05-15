@@ -52,7 +52,8 @@ pub async fn proxy_handler(
     );
     log.set_gateway_key(Some(principal.key_id.clone()));
     log.set_request_body(request_body_for_log);
-    log.set_model(extract_model(&body_bytes));
+    let request_model = extract_model(&body_bytes);
+    log.set_model(request_model.clone());
     let client_ua = headers
         .get("user-agent")
         .and_then(|v| v.to_str().ok())
@@ -92,7 +93,8 @@ pub async fn proxy_handler(
 
     // Resolve the route for this provider. The chain falls back to a
     // primary-only chain when no explicit route is defined.
-    let route = find_route(&config, &provider);
+    let request_path = format!("/v1/{}{}", provider, upstream_path);
+    let route = find_route(&config, &provider, &request_path, request_model.as_deref());
     let chain = match &route {
         Some(r) => ProviderChain::from_route(r),
         None => ProviderChain::primary_only(&provider),
@@ -411,11 +413,48 @@ pub async fn proxy_handler(
     Ok(response)
 }
 
-fn find_route<'a>(config: &'a AppConfig, provider: &str) -> Option<&'a RouteConfig> {
+fn find_route<'a>(
+    config: &'a AppConfig,
+    provider: &str,
+    request_path: &str,
+    model: Option<&str>,
+) -> Option<&'a RouteConfig> {
     config
         .routes
         .iter()
-        .find(|r| r.primary.provider == provider)
+        .find(|r| route_matches(r, provider, request_path, model))
+}
+
+fn route_matches(
+    route: &RouteConfig,
+    provider: &str,
+    request_path: &str,
+    model: Option<&str>,
+) -> bool {
+    if route.primary.provider != provider {
+        return false;
+    }
+    if let Some(pattern) = route.match_.path.as_deref() {
+        if !path_matches(pattern, request_path) {
+            return false;
+        }
+    }
+    if let Some(prefix) = route.match_.model_prefix.as_deref() {
+        match model {
+            Some(m) if m.starts_with(prefix) => {}
+            _ => return false,
+        }
+    }
+    true
+}
+
+/// Trailing `*` in the pattern is treated as a wildcard suffix; without it the
+/// match is exact. We don't currently support `*` anywhere else in the pattern.
+fn path_matches(pattern: &str, path: &str) -> bool {
+    match pattern.strip_suffix('*') {
+        Some(prefix) => path.starts_with(prefix),
+        None => path == pattern,
+    }
 }
 
 fn build_cached_response(
@@ -535,5 +574,147 @@ fn captured_body_to_string(buf: &BytesMut, truncated: bool) -> Option<String> {
         Some(format!("{s}\n…[truncated]"))
     } else {
         Some(s)
+    }
+}
+
+#[cfg(test)]
+mod route_match_tests {
+    use super::*;
+    use gateway_core::config::{RouteMatch, RouteTarget};
+
+    fn route(provider: &str, path: Option<&str>, model_prefix: Option<&str>) -> RouteConfig {
+        RouteConfig {
+            match_: RouteMatch {
+                path: path.map(str::to_string),
+                model_prefix: model_prefix.map(str::to_string),
+            },
+            primary: RouteTarget {
+                provider: provider.to_string(),
+                model: None,
+                trigger: vec![],
+            },
+            cache: Default::default(),
+            retry: Default::default(),
+            fallbacks: vec![],
+        }
+    }
+
+    #[test]
+    fn path_glob_suffix_matches_prefix() {
+        assert!(path_matches(
+            "/v1/openai/*",
+            "/v1/openai/v1/chat/completions"
+        ));
+        assert!(path_matches("/v1/openai/*", "/v1/openai/"));
+        assert!(path_matches("/v1/openai/*", "/v1/openai/x"));
+    }
+
+    #[test]
+    fn path_glob_does_not_match_other_provider() {
+        assert!(!path_matches("/v1/openai/*", "/v1/anthropic/v1/messages"));
+    }
+
+    #[test]
+    fn path_without_glob_is_exact() {
+        assert!(path_matches("/v1/openai/v1/models", "/v1/openai/v1/models"));
+        assert!(!path_matches(
+            "/v1/openai/v1/models",
+            "/v1/openai/v1/models/abc"
+        ));
+    }
+
+    #[test]
+    fn empty_match_block_matches_anything_for_provider() {
+        let r = route("openai", None, None);
+        assert!(route_matches(&r, "openai", "/v1/openai/anything", None));
+        assert!(route_matches(
+            &r,
+            "openai",
+            "/v1/openai/x",
+            Some("gpt-4o-mini")
+        ));
+    }
+
+    #[test]
+    fn provider_mismatch_fails_fast() {
+        let r = route("openai", None, None);
+        assert!(!route_matches(
+            &r,
+            "anthropic",
+            "/v1/anthropic/v1/messages",
+            None
+        ));
+    }
+
+    #[test]
+    fn model_prefix_requires_a_model() {
+        let r = route("openai", None, Some("gpt-"));
+        assert!(route_matches(
+            &r,
+            "openai",
+            "/v1/openai/anything",
+            Some("gpt-4o-mini")
+        ));
+        assert!(!route_matches(
+            &r,
+            "openai",
+            "/v1/openai/anything",
+            Some("o1-preview")
+        ));
+        assert!(!route_matches(&r, "openai", "/v1/openai/anything", None));
+    }
+
+    #[test]
+    fn path_and_model_prefix_combine_as_and() {
+        let r = route("openai", Some("/v1/openai/v1/chat/*"), Some("gpt-"));
+        assert!(route_matches(
+            &r,
+            "openai",
+            "/v1/openai/v1/chat/completions",
+            Some("gpt-4o-mini"),
+        ));
+        // Path miss
+        assert!(!route_matches(
+            &r,
+            "openai",
+            "/v1/openai/v1/embeddings",
+            Some("gpt-4o-mini"),
+        ));
+        // Model miss
+        assert!(!route_matches(
+            &r,
+            "openai",
+            "/v1/openai/v1/chat/completions",
+            Some("o1-preview"),
+        ));
+    }
+
+    #[test]
+    fn find_route_picks_first_matching_entry() {
+        let mut cfg = AppConfig {
+            server: Default::default(),
+            storage: gateway_core::config::StorageConfig::Memory {
+                cache: Default::default(),
+            },
+            admin: Default::default(),
+            providers: Default::default(),
+            routes: vec![],
+            limits: vec![],
+            budgets: vec![],
+            observability: Default::default(),
+        };
+        // Specific chat-only route first
+        cfg.routes
+            .push(route("openai", Some("/v1/openai/v1/chat/*"), None));
+        // Catch-all fallback
+        cfg.routes.push(route("openai", None, None));
+
+        // Chat request: matches the first.
+        let r = find_route(&cfg, "openai", "/v1/openai/v1/chat/completions", None).unwrap();
+        assert_eq!(r.match_.path.as_deref(), Some("/v1/openai/v1/chat/*"));
+
+        // Embeddings request: falls through to the catch-all.
+        let r = find_route(&cfg, "openai", "/v1/openai/v1/embeddings", None).unwrap();
+        assert!(r.match_.path.is_none());
     }
 }

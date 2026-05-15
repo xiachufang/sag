@@ -148,11 +148,19 @@ providers:
 
 ## `routes`
 
-每条路由给一个 provider 绑定代理策略(缓存、重试、回退)。**按 `primary.provider` 匹配**:`/v1/{provider}/*` 中的 `{provider}` 等于 `routes[i].primary.provider` 时命中,取第一条匹配。**`routes` 与请求路径、模型名无关**。
+每条路由给一个 provider 绑定代理策略(缓存、重试、回退)。按数组顺序匹配,**第一条同时满足以下三个条件**的命中:
+
+1. `primary.provider` 与 URL 中的 `{provider}` 相等;
+2. 若 `match.path` 有值,请求路径(`/v1/{provider}/...` 全路径)按规则匹配;
+3. 若 `match.model_prefix` 有值,请求体里的 `model` 字段以该前缀开头。
 
 ```yaml
 routes:
-  - primary:
+  # 给 chat 路径加 1 小时缓存,只对 gpt- 系列模型生效
+  - match:
+      path: /v1/openai/v1/chat/*
+      model_prefix: gpt-
+    primary:
       provider: openai
       model: gpt-4o-mini      # 可选,改写模型
     cache:
@@ -165,18 +173,22 @@ routes:
       - provider: anthropic
         model: claude-3-5-sonnet
         trigger: [upstream_5xx, timeout]
+
+  # 兜底:其他 openai 请求(embeddings 等),没有缓存
+  - primary:
+      provider: openai
 ```
 
 **没有匹配的路由(或 `routes: []`)时**:走 `ProviderChain::primary_only`,仅有主供应商、默认重试参数(`max_attempts: 3`, `initial_backoff_ms: 500`)、**缓存禁用**、**无 fallback**。等价于"裸代理 + 默认重试"。
 
-### `match`(字段保留,当前未生效)
+### `match`
 
 | 字段 | 默认 | 说明 |
 | --- | --- | --- |
-| `path` | `None` | 计划用于路径前缀匹配,**当前实现不读取**。 |
-| `model_prefix` | `None` | 计划用于按请求体 `model` 字段前缀分流,**当前实现不读取**。 |
+| `path` | `None` | 请求路径模式。末尾 `*` 表示"前缀匹配",无 `*` 表示精确匹配。例:`/v1/openai/*` 匹配该前缀下所有路径,`/v1/openai/v1/models` 仅匹配该路径。**对比的是完整外部路径**,包括 `/v1/{provider}/` 前缀。 |
+| `model_prefix` | `None` | 请求体 `model` 字段的字符串前缀。例:`gpt-` 匹配 `gpt-4o-mini`、`gpt-3.5-turbo` 等。若设置了 `model_prefix` 但请求没有 `model` 字段(GET /v1/models 等),视为不匹配。 |
 
-写了不会报错,但也不会改变匹配结果。所有路由匹配只看 `primary.provider`。如果需要给同一 provider 配多套策略,目前只能取数组里第一条。
+两个字段都不写 → 只看 `primary.provider`,该 provider 的所有请求都命中。两者都写 → AND 关系。如果同一 provider 配多套策略,把更具体的放在数组前面,兜底的放后面。
 
 ### `primary` / `fallbacks` (RouteTarget)
 
