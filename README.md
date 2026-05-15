@@ -6,7 +6,7 @@
 
 ## 特性
 
-- **统一代理**:`/v1/{provider}/*` 透明转发到上游,支持流式响应。
+- **统一代理**:`/v1/{namespace}/`* 透明转发到上游,支持流式响应。
 - **多供应商**:目前内置 OpenAI、Anthropic;按路由配置主备和回退触发条件。
 - **认证与密钥管理**:基于 Argon2 的 API Key,Admin 走 JWT;凭证用 AES-GCM + master key 加密落库。
 - **限流与并发控制**:基于 `governor` 的 RPM / TPM / 并发上限,目标可按 Key 或 `*` 通配。
@@ -53,13 +53,15 @@ docker compose up --build
 
 网关在 `http://localhost:8080` 暴露:
 
-| 路径 | 用途 |
-| --- | --- |
-| `/ui/` | 管理 UI |
-| `/v1/{provider}/*` | 上游代理入口 |
-| `/admin/*` | 管理 API(需 Admin Token) |
-| `/healthz`, `/readyz` | 健康检查 |
-| `/metrics` | Prometheus 指标 |
+
+| 路径                    | 用途                    |
+| --------------------- | --------------------- |
+| `/ui/`                | 管理 UI                 |
+| `/v1/{namespace}/*`   | 上游代理入口                |
+| `/admin/*`            | 管理 API(需 Admin Token) |
+| `/healthz`, `/readyz` | 健康检查                  |
+| `/metrics`            | Prometheus 指标         |
+
 
 ## 使用示例
 

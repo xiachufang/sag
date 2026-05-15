@@ -215,7 +215,7 @@ async function viewLogs() {
     ${headerHtml("#/logs")}
     <main>
       <div class="toolbar">
-        <input id="fprov" placeholder="provider (e.g. openai)">
+        <input id="fprov" placeholder="namespace (e.g. openai)">
         <input id="fmodel" placeholder="model">
         <select id="fstatus">
           <option value="">any status</option>
@@ -241,7 +241,7 @@ window.reloadLogs = async () => {
     const r = await api(`/admin/logs?${params}`);
     const rows = r.items || [];
     const html = rows.length === 0 ? `<div class="muted">No logs yet.</div>` :
-      `<table><thead><tr><th>Time</th><th>Provider</th><th>Model</th><th>Endpoint</th><th>Status</th><th>HTTP</th><th>Cached</th><th>Latency</th></tr></thead>
+      `<table><thead><tr><th>Time</th><th>Namespace</th><th>Model</th><th>Endpoint</th><th>Status</th><th>HTTP</th><th>Cached</th><th>Latency</th></tr></thead>
        <tbody>${rows.map(r=>`<tr class="clickable" onclick="window.openLog('${r.id}')">
          <td class="muted">${fmtTs(r.request_ts)}</td>
          <td>${escapeHtml(r.provider||'')}</td>
@@ -269,7 +269,7 @@ window.openLog = async (id) => {
       <h3>Request <span class="code">${escapeHtml(d.id)}</span></h3>
       <p class="muted">${fmtTs(d.request_ts)}</p>
       <div class="row" style="margin-bottom:14px">
-        <div><label>Provider</label><div>${escapeHtml(d.provider||'-')}</div></div>
+        <div><label>Namespace</label><div>${escapeHtml(d.provider||'-')}</div></div>
         <div><label>Model</label><div>${escapeHtml(d.model||'-')}</div></div>
         <div><label>Endpoint</label><div class="muted">${escapeHtml(d.endpoint||'-')}</div></div>
       </div>
@@ -307,9 +307,9 @@ async function viewCost() {
     <main>
       <div class="toolbar">
         <select id="cgroup">
-          <option value="provider,model">by provider+model</option>
+          <option value="provider,model">by namespace+model</option>
           <option value="day">by day</option>
-          <option value="provider,model,day">by provider+model+day</option>
+          <option value="provider,model,day">by namespace+model+day</option>
           <option value="gateway_key">by key</option>
         </select>
         <button onclick="window.reloadCost()">Apply</button>
@@ -342,6 +342,11 @@ window.reloadBudgets = async () => {
   } catch (e) { $("#budgetsPanel").innerHTML = `<div class="status-msg">${escapeHtml(e.message)}</div>`; }
 };
 
+// Translate backend grouping keys (still called "provider" server-side) into
+// the user-facing "namespace" terminology introduced by match.namespace.
+const COST_HEADER_LABEL = { provider: "namespace" };
+const costHeaderLabel = (k) => COST_HEADER_LABEL[k] || k;
+
 window.reloadCost = async () => {
   const gb = $("#cgroup").value;
   try {
@@ -350,7 +355,7 @@ window.reloadCost = async () => {
     const headers = Object.keys(groups[0]?.key || {});
     const html = groups.length === 0 ? `<div class="muted">No cost data yet. Make a few requests with a known model first.</div>` :
       `<div style="margin-bottom:10px">Total: <strong>$${r.total_cost_usd.toFixed(6)}</strong></div>
-       <table><thead><tr>${headers.map(h=>`<th>${escapeHtml(h)}</th>`).join("")}
+       <table><thead><tr>${headers.map(h=>`<th>${escapeHtml(costHeaderLabel(h))}</th>`).join("")}
           <th>requests</th><th>prompt</th><th>completion</th><th>cost (USD)</th><th>savings</th></tr></thead>
        <tbody>${groups.map(g=>`<tr>
          ${headers.map(h=>`<td>${escapeHtml(g.key[h]||'-')}</td>`).join("")}
