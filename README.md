@@ -2,7 +2,7 @@
 
 一个用 Rust 编写的轻量级 AI API 网关,在你的应用和上游模型供应商(OpenAI、Anthropic)之间提供统一的代理层,内置认证、限流、预算、缓存、重试和回退能力。
 
-📖 **完整文档:[GitHub Pages](https://xiachufang.github.io/sag/)** (源在 `docs/src/`,基于 mdBook)
+📖 **完整文档:[tech.xiachufang.xyz/sag](http://tech.xiachufang.xyz/sag/)** (源在 `docs/src/`,基于 mdBook)
 
 ## 特性
 
