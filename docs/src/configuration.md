@@ -128,7 +128,7 @@ storage:
 
 ```yaml
 providers:
-  openai:
+  openai:                          # key = openai → 隐式选 openai auth adapter
     base_url: https://api.openai.com
     credential_ref: env://OPENAI_API_KEY
     headers:
@@ -136,13 +136,53 @@ providers:
   anthropic:
     base_url: https://api.anthropic.com
     credential_ref: env://ANTHROPIC_API_KEY
+  doubao:                          # 任意名字
+    kind: openai-compatible        # ← 显式指定 auth adapter
+    base_url: https://ark.cn-beijing.volces.com/api/v3
+    credential_ref: env://DOUBAO_API_KEY
 ```
 
 | 字段 | 必填 | 说明 |
 | --- | --- | --- |
+| `kind` | 否 | Auth adapter 类型。未设置时,落到 map 里的 key 名(只有那些 key 名等于内置 adapter 名的配法才能省略)。已支持的取值见下。 |
 | `base_url` | 是 | 上游基础 URL,客户端路径会拼在后面。 |
 | `credential_ref` | 是 | `env://VAR_NAME` 从环境变量读取,或 `secret://<credential-id>` 从加密落库的凭证库读取(凭证由 Admin API 注入)。 |
 | `headers` | 否 | 透传给上游的额外固定 header。 |
+
+### 支持的 `kind`
+
+| 值 | Auth 行为 |
+| --- | --- |
+| `openai` | `Authorization: Bearer <key>` + `api-key: <key>` 双 header |
+| `openai-compatible` | 同上(用于豆包、DeepSeek、Together、Mistral、Groq、Azure OpenAI、vLLM、Ollama、LM Studio 等所有沿用 OpenAI 协议的上游) |
+| `deepseek` | 同上(`openai-compatible` 的别名) |
+| `anthropic` | `x-api-key: <key>`,并在 client 未设置时注入 `anthropic-version: 2023-06-01` |
+
+未设置 `kind` 时,系统直接拿 providers map 的 key 名去匹配上表 —— 所以历史配法 `providers.openai: { ... }` 仍然有效。但只要 key 名不是上面四个之一,就**必须**写 `kind`,否则启动期 `validate` 拒绝加载。
+
+### 接入一个新的 OpenAI 兼容供应商
+
+只需要一条配置,**不需要改任何代码**:
+
+```yaml
+providers:
+  deepseek:
+    kind: openai-compatible
+    base_url: https://api.deepseek.com
+    credential_ref: env://DEEPSEEK_API_KEY
+
+  groq:
+    kind: openai-compatible
+    base_url: https://api.groq.com/openai
+    credential_ref: env://GROQ_API_KEY
+
+  local-vllm:
+    kind: openai-compatible
+    base_url: http://10.0.0.5:8000
+    credential_ref: env://VLLM_TOKEN
+```
+
+如果上游需要额外固定 header(比如 Azure OpenAI 的 `api-version` 查询参数走 header,或自定义路由 key),写在 `headers:` 里即可。如果上游使用**完全不同的 auth 协议**(非 OpenAI、非 Anthropic),才需要在 `crates/gateway-core/src/providers/` 加一个新 adapter,详见 [开发指南](./development.md)。
 
 ---
 

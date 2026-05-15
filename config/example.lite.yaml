@@ -22,6 +22,7 @@ providers:
     base_url: https://api.openai.com
     credential_ref: env://OPENAI_API_KEY
   doubao:
+    kind: openai-compatible
     base_url: https://ark.cn-beijing.volces.com/api/v3
     credential_ref: env://DOUBAO_API_KEY
   anthropic:

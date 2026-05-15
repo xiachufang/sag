@@ -82,16 +82,22 @@ sqlx migrate run --source migrations/postgres --database-url postgres://gateway:
 
 ## 加新的供应商
 
-1. 在 `crates/gateway-core/src/providers/` 加一个 `<name>.rs`,实现 `ProviderAdapter` trait(看 `openai.rs` 作模板)。
-2. 在 `providers/mod.rs` 注册。
-3. 在 `pricing-catalog.json` 加该供应商的模型 → 单价。
+绝大多数情况下你**不需要写代码** —— 如果新供应商的 API 兼容 OpenAI 协议(豆包、DeepSeek、Groq、Together、Mistral、Azure OpenAI、vLLM、Ollama、LM Studio 等都属于这类),直接在 YAML 里加一条 `providers.<name>: { kind: openai-compatible, base_url: ..., credential_ref: ... }` 即可。具体写法见 [配置参考 > providers](./configuration.md#providers)。
+
+**只有当上游使用完全不同的认证协议时**(既不是 OpenAI 也不是 Anthropic),才需要新建一个 auth adapter:
+
+1. 在 `crates/gateway-core/src/providers/` 加一个 `<name>.rs`,实现 `AuthInjector` trait(看 `openai.rs` 和 `anthropic.rs` 作模板)。adapter 主要做两件事:
+   - 改写 outgoing request 的 auth header(替换客户端送来的 Authorization)。
+   - 注入该 provider 要求的固定 header(如 anthropic 的 `anthropic-version`)。
+2. 在 `providers/mod.rs`:
+   - `pub mod <name>;`
+   - 在 `build_auth_injector` 的 match 里加一个 `kind` 分支
+   - 在 `is_known_provider_kind` 里加同一个 `kind` —— 让启动期 `validate` 认识它
+3. 在 `pricing-catalog.json` 加该供应商的模型 → 单价(如果你想跟踪成本)。
 4. 写测试(参考 `crates/gateway-core/src/providers/openai.rs` 末尾的单元测试)。
-5. 配置文件里用 `providers.<name>: { ... }` 引用。
+5. 配置文件里用 `providers.<name>: { kind: <kind>, ... }` 引用。
 
-供应商适配器主要做两件事:
-
-- 改写 outgoing request 的 auth header(从透传客户端 token,改成上游真凭证)。
-- 从 response/stream 中提取 token usage,以便算成本与计入 TPM 限制。
+至于 token usage 抽取(用于成本核算和 TPM 限流):目前在 `crates/gateway-api/src/tokens.rs::extract_token_usage` 集中处理,假设上游响应体里有标准的 `usage` 字段(OpenAI / Anthropic 都满足)。完全不同形态的响应需要在那里加一条解析分支。
 
 ## 加新的 Admin 端点
 

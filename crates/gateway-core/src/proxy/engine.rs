@@ -222,7 +222,8 @@ async fn resolve_provider(
     master: Option<&MasterKey>,
     project_id: &str,
 ) -> Result<ResolvedProvider> {
-    let injector = build_auth_injector(name)?;
+    let kind = cfg.kind.as_deref().unwrap_or(name);
+    let injector = build_auth_injector(kind)?;
     let api_key = resolve_credential(cfg, env_overrides, metadata, master, project_id).await?;
     Ok(ResolvedProvider {
         base_url: cfg.base_url.clone(),

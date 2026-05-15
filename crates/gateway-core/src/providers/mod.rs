@@ -17,12 +17,22 @@ pub trait AuthInjector: Send + Sync {
     fn inject(&self, headers: &mut http::HeaderMap, api_key: &str);
 }
 
-pub fn build_auth_injector(provider: &str) -> Result<Box<dyn AuthInjector>> {
-    match provider {
+pub fn build_auth_injector(kind: &str) -> Result<Box<dyn AuthInjector>> {
+    match kind {
         "openai" | "deepseek" | "openai-compatible" => Ok(Box::new(openai::OpenAiAuth)),
         "anthropic" => Ok(Box::new(anthropic::AnthropicAuth)),
         other => Err(GatewayError::ProviderUnknown(other.into())),
     }
+}
+
+/// Used by `AppConfig::validate` to fail-fast on typos in the YAML
+/// `providers.<x>.kind` field. Must stay in sync with the match in
+/// `build_auth_injector`.
+pub fn is_known_provider_kind(kind: &str) -> bool {
+    matches!(
+        kind,
+        "openai" | "deepseek" | "openai-compatible" | "anthropic"
+    )
 }
 
 /// Resolve a provider's API key. Supports `env://VAR` (env lookup) and

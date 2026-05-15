@@ -5,6 +5,7 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{GatewayError, Result};
+use crate::providers::is_known_provider_kind;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct AppConfig {
@@ -172,6 +173,13 @@ fn default_root_token_env() -> String {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ProviderConfig {
+    /// Auth adapter to use. Currently recognised: `openai`,
+    /// `openai-compatible`, `deepseek`, `anthropic`. When unset, the
+    /// gateway falls back to the providers-map key, which preserves
+    /// backwards compatibility with configs that named the entry
+    /// after its adapter (e.g. `providers.openai: { ... }`).
+    #[serde(default)]
+    pub kind: Option<String>,
     pub base_url: String,
     /// `env://VAR_NAME` to read directly from env, or `secret://<credential-id>`
     /// to look up an encrypted credential from the metadata store.
@@ -358,6 +366,14 @@ impl AppConfig {
     }
 
     pub fn validate(&self) -> Result<()> {
+        for (name, p) in &self.providers {
+            let kind = p.kind.as_deref().unwrap_or(name);
+            if !is_known_provider_kind(kind) {
+                return Err(GatewayError::BadRequest(format!(
+                    "provider '{name}' has unsupported kind '{kind}'; supported: openai, openai-compatible, deepseek, anthropic"
+                )));
+            }
+        }
         for route in &self.routes {
             if !self.providers.contains_key(&route.primary.provider) {
                 return Err(GatewayError::BadRequest(format!(
@@ -379,5 +395,75 @@ impl AppConfig {
 
     pub fn request_timeout(&self) -> Duration {
         Duration::from_millis(self.server.request_timeout_ms)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn provider_kind_defaults_to_map_key() {
+        let yaml = r#"
+storage:
+  profile: memory
+providers:
+  openai:
+    base_url: https://api.openai.com
+    credential_ref: env://X
+"#;
+        let cfg = AppConfig::load_from_str(yaml).expect("valid");
+        // No explicit kind — falls back to the providers-map key.
+        assert!(cfg.providers["openai"].kind.is_none());
+    }
+
+    #[test]
+    fn explicit_kind_decouples_name_from_adapter() {
+        let yaml = r#"
+storage:
+  profile: memory
+providers:
+  doubao:
+    kind: openai-compatible
+    base_url: https://ark.example
+    credential_ref: env://X
+"#;
+        let cfg = AppConfig::load_from_str(yaml).expect("valid");
+        assert_eq!(
+            cfg.providers["doubao"].kind.as_deref(),
+            Some("openai-compatible")
+        );
+    }
+
+    #[test]
+    fn unknown_kind_is_rejected_at_load() {
+        let yaml = r#"
+storage:
+  profile: memory
+providers:
+  weird:
+    kind: gemini-but-typo
+    base_url: https://example
+    credential_ref: env://X
+"#;
+        let err = AppConfig::load_from_str(yaml).expect_err("should fail");
+        let msg = format!("{err}");
+        assert!(msg.contains("unsupported kind"), "got: {msg}");
+    }
+
+    #[test]
+    fn unknown_kind_via_implicit_name_also_rejected() {
+        // No explicit kind, and the map key isn't a recognised adapter.
+        let yaml = r#"
+storage:
+  profile: memory
+providers:
+  doubao:
+    base_url: https://example
+    credential_ref: env://X
+"#;
+        let err = AppConfig::load_from_str(yaml).expect_err("should fail");
+        let msg = format!("{err}");
+        assert!(msg.contains("unsupported kind"), "got: {msg}");
     }
 }
