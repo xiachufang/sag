@@ -298,6 +298,8 @@ window.openLog = async (id) => {
       ["Completion tokens", num(d.completion_tokens)],
       ["Cached tokens", num(d.cached_tokens)],
       ["Total tokens", num(d.total_tokens)],
+      ["Client IP", escapeHtml(d.client_ip || "-")],
+      ["User-Agent", `<span class="muted">${escapeHtml(d.user_agent || "-")}</span>`],
     ];
     $("#drawerBody").innerHTML = `
       <h3>Request <span class="code">${escapeHtml(d.id)}</span></h3>

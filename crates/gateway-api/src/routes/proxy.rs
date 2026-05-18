@@ -1,7 +1,9 @@
 use std::time::{Duration, Instant};
 
+use std::net::SocketAddr;
+
 use axum::body::Body;
-use axum::extract::{Path, State};
+use axum::extract::{ConnectInfo, Path, State};
 use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode};
 use axum::response::Response;
 use bytes::{Bytes, BytesMut};
@@ -33,6 +35,7 @@ pub async fn proxy_handler(
     State(state): State<AppState>,
     principal: GatewayKeyPrincipal,
     Path((namespace, tail)): Path<(String, String)>,
+    ConnectInfo(remote_addr): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     method: Method,
     body: Body,
@@ -58,7 +61,8 @@ pub async fn proxy_handler(
         .get("user-agent")
         .and_then(|v| v.to_str().ok())
         .map(|s| s.to_string());
-    log.set_client(None, client_ua);
+    let client_ip = extract_client_ip(&headers, remote_addr);
+    log.set_client(client_ip, client_ua);
 
     // Budget block check before doing any upstream work.
     if state
@@ -158,12 +162,15 @@ pub async fn proxy_handler(
             usage.cached,
             usage.total_tokens(),
         );
-        let mut would_have = None;
-        // For cache hits we don't know which upstream actually originally served;
-        // best effort is the route's primary, falling back to the namespace.
-        let upstream_for_pricing = route
-            .map(|r| r.primary.provider.as_str())
+        // Surface the upstream that originally served this response so the
+        // UI's "Provider" row keeps showing the real backend on cache hits
+        // (instead of falling back to the namespace).
+        let cached_provider = cached.served_by.clone();
+        let upstream_for_pricing = cached_provider
+            .as_deref()
+            .or_else(|| route.map(|r| r.primary.provider.as_str()))
             .unwrap_or(namespace.as_str());
+        let mut would_have = None;
         if let Some(model) = log.model().map(str::to_string) {
             if let Some(bd) = gateway_core::pricing::compute_cost(
                 &state.pricing,
@@ -179,6 +186,12 @@ pub async fn proxy_handler(
             }
         }
         log.set_cost(Some(0.0), would_have);
+        if let Some(p) = cached_provider {
+            log.merge_metadata(
+                "attempts",
+                serde_json::json!([{ "provider": p, "outcome": "cache_hit" }]),
+            );
+        }
         log.submit(&state.stores.logs).await;
         metrics::counter!("gateway_cache_response_hit_total").increment(1);
         return Ok(build_cached_response(cached, cache_status, &cache_key));
@@ -333,6 +346,7 @@ pub async fn proxy_handler(
                     .collect(),
                 chunks: cache_chunks,
                 finished_at_ms: chrono::Utc::now().timestamp_millis(),
+                served_by: Some(upstream_provider.clone()),
             };
             match payload.encode() {
                 Ok(blob) => {
@@ -506,6 +520,31 @@ fn insert_cache_headers(
             headers.insert(HeaderName::from_static("x-gateway-cache-age"), v);
         }
     }
+}
+
+/// Best-effort client IP: prefer the first entry in `X-Forwarded-For`
+/// (set by upstream proxies / load balancers), then `X-Real-IP`, then the
+/// raw socket peer. Tokens are trimmed and we keep only the IP, not the
+/// optional port, so the value matches what operators expect in logs.
+fn extract_client_ip(headers: &HeaderMap, remote_addr: SocketAddr) -> Option<String> {
+    if let Some(forwarded) = headers
+        .get("x-forwarded-for")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.split(',').next())
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+    {
+        return Some(forwarded.to_string());
+    }
+    if let Some(real) = headers
+        .get("x-real-ip")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+    {
+        return Some(real.to_string());
+    }
+    Some(remote_addr.ip().to_string())
 }
 
 fn cached_body_preview(cached: &CachedResponse) -> Option<String> {

@@ -13,6 +13,11 @@ pub struct CachedResponse {
     pub headers: Vec<(String, String)>,
     pub chunks: Vec<CachedChunk>,
     pub finished_at_ms: i64,
+    /// Upstream provider that actually served the request that wrote this
+    /// entry. Used purely for observability so cache hits can report which
+    /// provider originally produced the response. Old blobs without this
+    /// field fail decode and are treated as cache misses by the caller.
+    pub served_by: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -59,6 +64,7 @@ mod tests {
                 },
             ],
             finished_at_ms: 1_700_000_000_000,
+            served_by: Some("openai".into()),
         }
     }
 
@@ -86,6 +92,7 @@ mod tests {
                 data: big_text.into_bytes(),
             }],
             finished_at_ms: 0,
+            served_by: None,
         };
         let raw = bincode::serde::encode_to_vec(&payload, bincode::config::standard()).unwrap();
         let compressed = payload.encode().unwrap();

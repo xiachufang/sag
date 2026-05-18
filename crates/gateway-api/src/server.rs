@@ -90,11 +90,14 @@ pub async fn serve(state: AppState, bind: &str) -> anyhow::Result<ServerHandle> 
     let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
 
     let join = tokio::spawn(async move {
-        axum::serve(listener, app)
-            .with_graceful_shutdown(async move {
-                let _ = shutdown_rx.await;
-            })
-            .await
+        axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .with_graceful_shutdown(async move {
+            let _ = shutdown_rx.await;
+        })
+        .await
     });
 
     Ok(ServerHandle {
