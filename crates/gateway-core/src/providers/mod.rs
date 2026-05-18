@@ -19,7 +19,7 @@ pub trait AuthInjector: Send + Sync {
 
 pub fn build_auth_injector(kind: &str) -> Result<Box<dyn AuthInjector>> {
     match kind {
-        "openai" | "deepseek" | "openai-compatible" => Ok(Box::new(openai::OpenAiAuth)),
+        "openai" => Ok(Box::new(openai::OpenAiAuth)),
         "anthropic" => Ok(Box::new(anthropic::AnthropicAuth)),
         other => Err(GatewayError::ProviderUnknown(other.into())),
     }
@@ -29,10 +29,7 @@ pub fn build_auth_injector(kind: &str) -> Result<Box<dyn AuthInjector>> {
 /// `providers.<x>.kind` field. Must stay in sync with the match in
 /// `build_auth_injector`.
 pub fn is_known_provider_kind(kind: &str) -> bool {
-    matches!(
-        kind,
-        "openai" | "deepseek" | "openai-compatible" | "anthropic"
-    )
+    matches!(kind, "openai" | "anthropic")
 }
 
 /// Resolve a provider's API key. Supports `env://VAR` (env lookup) and

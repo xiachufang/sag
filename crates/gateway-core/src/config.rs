@@ -173,11 +173,12 @@ fn default_root_token_env() -> String {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ProviderConfig {
-    /// Auth adapter to use. Currently recognised: `openai`,
-    /// `openai-compatible`, `deepseek`, `anthropic`. When unset, the
-    /// gateway falls back to the providers-map key, which preserves
-    /// backwards compatibility with configs that named the entry
-    /// after its adapter (e.g. `providers.openai: { ... }`).
+    /// Auth adapter to use. Currently recognised: `openai`, `anthropic`.
+    /// Use `openai` for any upstream that follows the OpenAI wire
+    /// protocol (the real api.openai.com, doubao, DeepSeek, Groq,
+    /// Together, vLLM, Ollama, …). When unset, the gateway falls back
+    /// to the providers-map key, which preserves backwards compatibility
+    /// with the convention `providers.openai: { ... }`.
     #[serde(default)]
     pub kind: Option<String>,
     pub base_url: String,
@@ -370,7 +371,7 @@ impl AppConfig {
             let kind = p.kind.as_deref().unwrap_or(name);
             if !is_known_provider_kind(kind) {
                 return Err(GatewayError::BadRequest(format!(
-                    "provider '{name}' has unsupported kind '{kind}'; supported: openai, openai-compatible, deepseek, anthropic"
+                    "provider '{name}' has unsupported kind '{kind}'; supported: openai, anthropic"
                 )));
             }
         }
@@ -424,15 +425,12 @@ storage:
   profile: memory
 providers:
   doubao:
-    kind: openai-compatible
+    kind: openai
     base_url: https://ark.example
     credential_ref: env://X
 "#;
         let cfg = AppConfig::load_from_str(yaml).expect("valid");
-        assert_eq!(
-            cfg.providers["doubao"].kind.as_deref(),
-            Some("openai-compatible")
-        );
+        assert_eq!(cfg.providers["doubao"].kind.as_deref(), Some("openai"));
     }
 
     #[test]
