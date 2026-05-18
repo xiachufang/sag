@@ -272,17 +272,27 @@ window.openLog = async (id) => {
     const meta = d.metadata ? JSON.stringify(d.metadata, null, 2) : "";
     const ms = (v) => (v != null ? v + " ms" : "-");
     const num = (v) => (v != null ? v : "-");
+    // Derive the actual upstream that served this request. When a fallback
+    // fires, `fallback_used` holds the provider name; otherwise the last
+    // attempt in the trace has the real upstream (which can differ from the
+    // URL namespace when match.namespace decouples them).
+    const attempts = Array.isArray(d.metadata?.attempts) ? d.metadata.attempts : [];
+    const lastProvider = attempts.length ? attempts[attempts.length - 1]?.provider : null;
+    const upstreamProvider = d.fallback_used || lastProvider || d.namespace || "-";
+    const providerCell = d.fallback_used
+      ? `${escapeHtml(d.fallback_used)} <span class="muted">(via fallback)</span>`
+      : escapeHtml(upstreamProvider);
     const rows = [
       ["Time", `<span class="muted">${fmtTs(d.request_ts)}</span>`],
       ["Namespace", escapeHtml(d.namespace || "-")],
+      ["Provider", providerCell],
       ["Model", escapeHtml(d.model || "-")],
       ["Endpoint", `<span class="muted">${escapeHtml(d.endpoint || "-")}</span>`],
       ["Status", `<span class="pill ${d.status === 'success' ? 'ok' : 'err'}">${escapeHtml(d.status)}</span> ${d.http_status || ""}`],
       ["Cached", d.cached ? "yes" : "no"],
       ["Retries", d.retry_count || 0],
-      ["Fallback", escapeHtml(d.fallback_used || "-")],
       ["Duration", ms(d.duration_ms)],
-      ["Upstream", ms(d.upstream_ms)],
+      ["Upstream ms", ms(d.upstream_ms)],
       ["TTFB", ms(d.ttfb_ms)],
       ["Prompt tokens", num(d.prompt_tokens)],
       ["Completion tokens", num(d.completion_tokens)],
