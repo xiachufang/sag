@@ -74,7 +74,7 @@ Authorization: Bearer sk-gw-live-xxxxxxxxxxxx
 1. 检查 `cache.enabled`,且请求体是确定性的(`temperature == 0` 且 `top_p >= 0.999`,或路由配了 `cache.allow_nondeterministic: true`,或带 `X-Gateway-Cache-Force` 头),则查缓存,命中则直接返回,响应头加 `X-Gateway-Cache-Status: hit`。
 2. 否则按 `primary` 转发,失败重试至 `retry.max_attempts` 次。
 3. 仍失败且 `trigger` 命中 → 切到下一个 `fallbacks[]`。
-4. 成功响应若满足缓存条件(≤ 2 MB、状态 2xx),写回 KV;流式响应也会缓存,replay 时保留 chunk 边界。
+4. 成功响应若满足缓存条件(≤ 20 MB、状态 2xx),写回 KV;流式响应也会缓存,replay 时保留 chunk 边界。
 5. 写日志,返回响应。
 
 **没有匹配的路由时**,网关直接返回 `404`(错误码 `not_found`),不会再把 namespace 当作 `providers` 表的 key 做兜底转发。想暴露 `/v1/<name>/...`,必须在 `routes[]` 里写一条对应的条目(最简写法 `- primary: { provider: <name> }`)。

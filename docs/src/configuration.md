@@ -291,7 +291,7 @@ routes:
 | `ttl` | `3600` | 缓存秒数。 |
 | `allow_nondeterministic` | `false` | 为 `true` 时,即使请求不是确定性采样(`temperature != 0` 或 `top_p < 0.999`)也写入/读取缓存。与请求头 `X-Gateway-Cache-Force` 按"或"关系合并 —— 任一为真即放行。 |
 
-缓存 key 来自请求体 + 路径的 blake3 摘要。流式响应**也会被缓存**(replay 时按原 chunk 边界发回),前提是请求体确定性(`temperature == 0` 且 `top_p >= 0.999`)且大小 ≤ 2 MB。要绕开确定性检查,可在路由上设置 `allow_nondeterministic: true`,或在请求头加 `X-Gateway-Cache-Force: 1`。
+缓存 key 来自请求体 + 路径的 blake3 摘要。流式响应**也会被缓存**(replay 时按原 chunk 边界发回),前提是请求体确定性(`temperature == 0` 且 `top_p >= 0.999`)且大小 ≤ 20 MB。要绕开确定性检查,可在路由上设置 `allow_nondeterministic: true`,或在请求头加 `X-Gateway-Cache-Force: 1`。
 
 ### `retry`
 

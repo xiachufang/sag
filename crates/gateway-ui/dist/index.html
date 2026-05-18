@@ -94,8 +94,8 @@
   .pane-actions { display: flex; justify-content: flex-end; gap: 10px; align-items: center; margin-bottom: 6px; }
   .pane-actions label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-size: 12px; color: var(--muted); }
   .pane-actions input[type=checkbox] { margin: 0; }
-  .pane-actions .ghost-btn { background: transparent; color: var(--muted); border: 1px solid var(--border); padding: 4px 10px; font-size: 12px; cursor: pointer; border-radius: 4px; font-weight: 500; }
-  .pane-actions .ghost-btn:hover { color: var(--text); border-color: var(--accent); }
+  .ghost-btn { background: transparent; color: var(--muted); border: 1px solid var(--border); padding: 4px 10px; font-size: 12px; cursor: pointer; border-radius: 4px; font-weight: 500; }
+  .ghost-btn:hover { color: var(--text); border-color: var(--accent); }
   /* Body pre */
   .detail-pre { background: var(--code); padding: 14px 16px; border-radius: 6px; overflow-x: auto; font-size: 12.5px; line-height: 1.55; margin: 0; font-family: ui-monospace, "SF Mono", Menlo, monospace; }
   .detail-pre.wrap { white-space: pre-wrap; word-break: break-word; }
@@ -404,6 +404,7 @@ function renderLogDetail(d) {
     <div class="detail-head">
       <a class="back" href="#/logs">← Back to logs</a>
       <h2>Request <span class="code">${escapeHtml(d.id)}</span></h2>
+      <button type="button" class="ghost-btn" style="margin-left:auto" onclick="window.copyCurl(this)" data-curl="${escapeHtml(buildCurl(d))}" title="Replays the request with $GATEWAY_KEY as a placeholder">Copy as curl</button>
     </div>
     <div class="panel"><div class="summary-cols">${dl(left)}${dl(right)}</div></div>
     <div class="panel" style="margin-top:16px">
@@ -442,6 +443,39 @@ window.toggleWrap = (key, on) => {
   if (!id) return;
   const el = document.getElementById(id);
   if (el) el.classList.toggle("wrap", !!on);
+};
+
+function buildCurl(d) {
+  const url = `${location.origin}/v1/${d.namespace || ""}${d.endpoint || ""}`;
+  const body = d.request_body || "";
+  const truncated = body.endsWith("…[truncated]");
+  const method = body ? "POST" : "GET";
+  // Escape chars that are special inside double-quoted shell strings: \ " $ `
+  const shq = s => s.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\$/g, "\\$").replace(/`/g, "\\`");
+  const parts = [
+    `curl -X ${method} "${shq(url)}"`,
+    // $GATEWAY_KEY left unescaped so the shell expands it
+    `  -H "Authorization: Bearer $GATEWAY_KEY"`,
+  ];
+  if (body) {
+    parts.push(`  -H "Content-Type: application/json"`);
+    parts.push(`  --data-raw "${shq(body)}"`);
+  }
+  let s = parts.join(" \\\n");
+  if (truncated) s = `# NOTE: logged request body is truncated to 64KB; curl will not replay faithfully.\n${s}`;
+  return s;
+}
+
+window.copyCurl = async (btn) => {
+  const text = btn.dataset.curl || "";
+  const original = btn.textContent;
+  try {
+    await navigator.clipboard.writeText(text);
+    btn.textContent = "Copied";
+  } catch {
+    btn.textContent = "Failed";
+  }
+  setTimeout(() => { btn.textContent = original; }, 1200);
 };
 
 window.copyPane = async (elementId, btn) => {
