@@ -19,7 +19,7 @@ ENV GATEWAY_PRICING_CATALOG=/app/pricing-catalog.json
 ENTRYPOINT ["/usr/local/bin/gateway"]
 
 FROM runtime AS lite
-CMD ["--config", "/app/config/example.lite.yaml"]
+CMD ["--config", "/app/config/lite.yaml"]
 
 FROM runtime AS standard
-CMD ["--config", "/app/config/example.standard.yaml"]
+CMD ["--config", "/app/config/standard.yaml"]

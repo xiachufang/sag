@@ -32,7 +32,7 @@ struct Cli {
         short,
         long,
         env = "GATEWAY_CONFIG",
-        default_value = "config/example.lite.yaml"
+        default_value = "config/lite.yaml"
     )]
     config: PathBuf,
 

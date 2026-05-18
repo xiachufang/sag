@@ -42,7 +42,7 @@ docker compose -f docker-compose.lite.yml up --build
 或本地编译:
 
 ```sh
-cargo run --release --bin gateway -- --config config/example.lite.yaml
+cargo run --release --bin gateway -- --config config/lite.yaml
 ```
 
 ### Standard 模式(Postgres + Redis)
@@ -81,7 +81,7 @@ API Key 在 Admin UI 或通过 `POST /admin/keys`(带 `GATEWAY_ROOT_TOKEN`)创�
 
 ## 配置
 
-完整字段说明见 [配置参考文档](./docs/src/configuration.md),示例见 `config/example.standard.yaml` 和 `config/example.lite.yaml`,主要字段:
+完整字段说明见 [配置参考文档](./docs/src/configuration.md),示例见 `config/standard.yaml` 和 `config/lite.yaml`,主要字段:
 
 - `server` — 监听地址、请求超时、默认项目 ID。
 - `storage` — `profile: lite | standard | memory`,以及对应的 SQLite / Postgres / Redis / 缓存设置。

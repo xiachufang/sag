@@ -2,7 +2,7 @@
 # Load .env and run the gateway in Lite mode via cargo.
 #
 # Usage:
-#   ./scripts/run-lite.sh                 # use config/example.lite.yaml
+#   ./scripts/run-lite.sh                 # use config/lite.yaml
 #   ./scripts/run-lite.sh --config xxx    # extra args are forwarded to gateway
 
 set -euo pipefail
@@ -27,5 +27,5 @@ set +a
 if [[ $# -gt 0 ]]; then
   exec cargo run --bin gateway -- "$@"
 else
-  exec cargo run --bin gateway -- --config config/example.lite.yaml
+  exec cargo run --bin gateway -- --config config/lite.yaml
 fi

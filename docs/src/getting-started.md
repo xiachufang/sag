@@ -54,7 +54,7 @@ docker compose up --build
 ### 方式 C:本地 cargo
 
 ```sh
-cargo run --release --bin gateway -- --config config/example.lite.yaml
+cargo run --release --bin gateway -- --config config/lite.yaml
 ```
 
 启动后日志里能看到:
@@ -100,7 +100,7 @@ curl http://localhost:8080/v1/openai/v1/chat/completions \
 
 ## 5. 创建一个 Admin 账号(可选)
 
-如果想用账号密码而不是 root token 登录 UI,先创建一个 admin。`example.lite.yaml` 默认已经开启 `admin.password_login: true`。
+如果想用账号密码而不是 root token 登录 UI,先创建一个 admin。`lite.yaml` 默认已经开启 `admin.password_login: true`。
 
 ```sh
 curl -X POST http://localhost:8080/admin/admins \

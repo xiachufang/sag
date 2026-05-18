@@ -27,7 +27,7 @@ observability: { ... }
 | --- | --- | --- |
 | `GATEWAY_MASTER_KEY` | 是 | 32 字节 base64,用于 Gateway Key 的 BLAKE3 keyed-hash 与 Admin JWT 签名。丢失即所有 Gateway Key 失效、所有已签发 JWT 失效。生成: `openssl rand -base64 32`。 |
 | `GATEWAY_ROOT_TOKEN` | 推荐 | Admin API 的初始 root token。变量名由 `admin.root_token`(如 `env://GATEWAY_ROOT_TOKEN`)指定,该字段为空则关闭 Admin API。 |
-| `GATEWAY_CONFIG` | 否 | 配置文件路径,等价于 `--config`,默认 `config/example.lite.yaml`。 |
+| `GATEWAY_CONFIG` | 否 | 配置文件路径,等价于 `--config`,默认 `config/lite.yaml`。 |
 | `GATEWAY_WORKERS` | 否 | 仅在校验时使用;`>1` 且 storage 为 `lite` 时会拒绝启动。 |
 | `RUST_LOG` | 否 | `tracing` EnvFilter 表达式,默认 `info,sqlx::query=warn`。 |
 | `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` / ... | 视配置 | 任何被 `credential: env://VAR` 引用的变量。 |

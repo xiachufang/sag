@@ -44,7 +44,7 @@ services:
       - ./pricing-catalog.json:/app/pricing-catalog.json:ro
     ports:
       - "8080:8080"
-    command: ["--config", "/app/config/example.standard.yaml"]
+    command: ["--config", "/app/config/standard.yaml"]
 
 volumes:
   pgdata:

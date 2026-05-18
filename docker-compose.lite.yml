@@ -16,4 +16,4 @@ services:
       - ./pricing-catalog.json:/app/pricing-catalog.json:ro
     ports:
       - "8080:8080"
-    command: ["--config", "/app/config/example.lite.yaml"]
+    command: ["--config", "/app/config/lite.yaml"]
