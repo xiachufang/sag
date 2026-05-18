@@ -25,6 +25,14 @@ providers:
     kind: openai
     base_url: https://ark.cn-beijing.volces.com/api/v3
     credential_ref: env://DOUBAO_API_KEY
+  openrouter:
+    kind: openai
+    base_url: https://openrouter.ai/api/v1
+    credential_ref: env://OPENROUTER_API_KEY
+  azure:
+    kind: openai
+    base_url: https://prod.openai.azure.com
+    credential_ref: env://AZURE_API_KEY
   anthropic:
     base_url: https://api.anthropic.com
     credential_ref: env://ANTHROPIC_API_KEY
@@ -34,6 +42,19 @@ routes:
       namespace: audiobook
     primary:
       provider: doubao
+    cache:
+      enabled: true
+      ttl: 3600
+    retry:
+      max_attempts: 3
+      initial_backoff_ms: 500
+    fallbacks:
+      - provider: openai
+        trigger: [upstream_5xx, timeout]
+  - match:
+      namespace: openrouter
+    primary:
+      provider: openrouter
     cache:
       enabled: true
       ttl: 3600
