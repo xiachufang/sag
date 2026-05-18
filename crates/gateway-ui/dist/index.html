@@ -68,10 +68,15 @@
   .drawer-bg { position: fixed; inset: 0; background: rgba(0,0,0,0.35); display: none; align-items: stretch; justify-content: flex-end; z-index: 20; }
   .drawer-bg.open { display: flex; }
   .drawer { width: min(720px, 100%); background: var(--panel); border-left: 1px solid var(--border); overflow-y: auto; padding: 24px 24px 60px; }
-  .drawer h3 { margin: 0 0 6px; font-size: 16px; }
+  .drawer h3 { margin: 0 0 12px; font-size: 16px; }
+  .drawer h4 { margin: 18px 0 6px; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600; }
   .drawer pre { background: var(--code); padding: 12px; border-radius: 6px; overflow: auto; font-size: 12px; max-height: 320px; }
   .drawer .row { gap: 16px; }
   .drawer label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+  .drawer .drawer-kv { width: 100%; border-collapse: collapse; font-size: 13px; margin-bottom: 4px; }
+  .drawer .drawer-kv th, .drawer .drawer-kv td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  .drawer .drawer-kv th { width: 140px; color: var(--muted); font-weight: 500; font-size: 12px; text-transform: none; letter-spacing: 0; }
+  .drawer .drawer-kv tr:last-child th, .drawer .drawer-kv tr:last-child td { border-bottom: 0; }
 </style>
 </head>
 <body>
@@ -265,35 +270,34 @@ window.openLog = async (id) => {
   try {
     const d = await api(`/admin/logs/${id}`);
     const meta = d.metadata ? JSON.stringify(d.metadata, null, 2) : "";
+    const ms = (v) => (v != null ? v + " ms" : "-");
+    const num = (v) => (v != null ? v : "-");
+    const rows = [
+      ["Time", `<span class="muted">${fmtTs(d.request_ts)}</span>`],
+      ["Namespace", escapeHtml(d.namespace || "-")],
+      ["Model", escapeHtml(d.model || "-")],
+      ["Endpoint", `<span class="muted">${escapeHtml(d.endpoint || "-")}</span>`],
+      ["Status", `<span class="pill ${d.status === 'success' ? 'ok' : 'err'}">${escapeHtml(d.status)}</span> ${d.http_status || ""}`],
+      ["Cached", d.cached ? "yes" : "no"],
+      ["Retries", d.retry_count || 0],
+      ["Fallback", escapeHtml(d.fallback_used || "-")],
+      ["Duration", ms(d.duration_ms)],
+      ["Upstream", ms(d.upstream_ms)],
+      ["TTFB", ms(d.ttfb_ms)],
+      ["Prompt tokens", num(d.prompt_tokens)],
+      ["Completion tokens", num(d.completion_tokens)],
+      ["Cached tokens", num(d.cached_tokens)],
+      ["Total tokens", num(d.total_tokens)],
+    ];
     $("#drawerBody").innerHTML = `
       <h3>Request <span class="code">${escapeHtml(d.id)}</span></h3>
-      <p class="muted">${fmtTs(d.request_ts)}</p>
-      <div class="row" style="margin-bottom:14px">
-        <div><label>Namespace</label><div>${escapeHtml(d.namespace||'-')}</div></div>
-        <div><label>Model</label><div>${escapeHtml(d.model||'-')}</div></div>
-        <div><label>Endpoint</label><div class="muted">${escapeHtml(d.endpoint||'-')}</div></div>
-      </div>
-      <div class="row" style="margin-bottom:14px">
-        <div><label>Status</label><div><span class="pill ${d.status==='success'?'ok':'err'}">${escapeHtml(d.status)}</span> ${d.http_status||''}</div></div>
-        <div><label>Cached</label><div>${d.cached?'yes':'no'}</div></div>
-        <div><label>Retries</label><div>${d.retry_count||0}</div></div>
-        <div><label>Fallback</label><div>${escapeHtml(d.fallback_used||'-')}</div></div>
-      </div>
-      <div class="row" style="margin-bottom:14px">
-        <div><label>Duration</label><div>${d.duration_ms!=null?d.duration_ms+' ms':'-'}</div></div>
-        <div><label>Upstream</label><div>${d.upstream_ms!=null?d.upstream_ms+' ms':'-'}</div></div>
-        <div><label>TTFB</label><div>${d.ttfb_ms!=null?d.ttfb_ms+' ms':'-'}</div></div>
-      </div>
-      <div class="row" style="margin-bottom:14px">
-        <div><label>Prompt tokens</label><div>${d.prompt_tokens??'-'}</div></div>
-        <div><label>Completion</label><div>${d.completion_tokens??'-'}</div></div>
-        <div><label>Cached tokens</label><div>${d.cached_tokens??'-'}</div></div>
-        <div><label>Total</label><div>${d.total_tokens??'-'}</div></div>
-      </div>
-      ${meta?`<label>Metadata</label><pre>${escapeHtml(meta)}</pre>`:''}
-      <label>Request body</label><pre>${escapeHtml(d.request_body||'-')}</pre>
-      <label>Response body</label><pre>${escapeHtml(d.response_body||'-')}</pre>
-      ${d.error_message?`<label>Error</label><pre>${escapeHtml(d.error_message)}</pre>`:''}`;
+      <table class="drawer-kv">
+        <tbody>${rows.map(([k, v]) => `<tr><th>${k}</th><td>${v}</td></tr>`).join("")}</tbody>
+      </table>
+      ${meta ? `<h4>Metadata</h4><pre>${escapeHtml(meta)}</pre>` : ""}
+      <h4>Request body</h4><pre>${escapeHtml(d.request_body || "-")}</pre>
+      <h4>Response body</h4><pre>${escapeHtml(d.response_body || "-")}</pre>
+      ${d.error_message ? `<h4>Error</h4><pre>${escapeHtml(d.error_message)}</pre>` : ""}`;
   } catch (e) { $("#drawerBody").innerHTML = `<div class="status-msg">${escapeHtml(e.message)}</div>`; }
 };
 
