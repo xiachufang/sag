@@ -1,10 +1,8 @@
 use std::collections::HashMap;
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
 use futures::stream::{BoxStream, StreamExt};
-use gateway_storage::traits::MetadataStore;
 use http::header::{HeaderName, HeaderValue, HOST};
 use http::HeaderMap;
 use reqwest::Method;
@@ -12,7 +10,6 @@ use reqwest::Method;
 use crate::config::{AppConfig, ProviderConfig};
 use crate::error::{GatewayError, Result};
 use crate::providers::{build_auth_injector, resolve_credential, AuthInjector};
-use crate::security::MasterKey;
 
 /// Headers stripped on the way to the upstream. We deliberately drop
 /// hop-by-hop headers and any auth supplied by the client (the gateway
@@ -83,12 +80,7 @@ pub enum ResponseBody {
 }
 
 impl ProxyEngine {
-    pub async fn new(
-        config: &AppConfig,
-        metadata: Option<Arc<dyn MetadataStore>>,
-        master_key: Option<MasterKey>,
-        project_id: &str,
-    ) -> Result<Self> {
+    pub fn new(config: &AppConfig) -> Result<Self> {
         let client = reqwest::Client::builder()
             .pool_idle_timeout(Duration::from_secs(90))
             .connect_timeout(Duration::from_secs(5))
@@ -99,15 +91,7 @@ impl ProxyEngine {
         let mut providers = HashMap::new();
         let env_overrides = HashMap::new();
         for (name, cfg) in &config.providers {
-            let resolved = resolve_provider(
-                name,
-                cfg,
-                &env_overrides,
-                metadata.as_ref(),
-                master_key.as_ref(),
-                project_id,
-            )
-            .await?;
+            let resolved = resolve_provider(name, cfg, &env_overrides)?;
             providers.insert(name.clone(), resolved);
         }
 
@@ -214,17 +198,14 @@ fn filter_response_headers(src: &HeaderMap) -> HeaderMap {
     out
 }
 
-async fn resolve_provider(
+fn resolve_provider(
     name: &str,
     cfg: &ProviderConfig,
     env_overrides: &HashMap<String, String>,
-    metadata: Option<&Arc<dyn MetadataStore>>,
-    master: Option<&MasterKey>,
-    project_id: &str,
 ) -> Result<ResolvedProvider> {
     let kind = cfg.kind.as_deref().unwrap_or(name);
     let injector = build_auth_injector(kind)?;
-    let api_key = resolve_credential(cfg, env_overrides, metadata, master, project_id).await?;
+    let api_key = resolve_credential(cfg, env_overrides)?;
     Ok(ResolvedProvider {
         base_url: cfg.base_url.clone(),
         api_key,
@@ -235,7 +216,7 @@ async fn resolve_provider(
 
 /// Allow tests / shutdown to hold the engine behind an Arc cheaply.
 impl ProxyEngine {
-    pub fn into_arc(self) -> Arc<Self> {
-        Arc::new(self)
+    pub fn into_arc(self) -> std::sync::Arc<Self> {
+        std::sync::Arc::new(self)
     }
 }

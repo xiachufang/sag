@@ -5,9 +5,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{GatewayError, Result};
 
-/// Embedded copy of `pricing-catalog.json` shipped with the binary.
-const EMBEDDED: &str = include_str!("../../../../pricing-catalog.json");
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PricingEntry {
     pub provider: String,
@@ -30,10 +27,6 @@ pub struct PricingCatalog {
 }
 
 impl PricingCatalog {
-    pub fn embedded() -> Self {
-        Self::from_str(EMBEDDED).expect("embedded catalog must parse")
-    }
-
     pub fn from_str(json: &str) -> Result<Self> {
         let f: CatalogFile = serde_json::from_str(json)
             .map_err(|e| GatewayError::Internal(format!("pricing catalog parse: {e}")))?;

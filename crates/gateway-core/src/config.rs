@@ -1,4 +1,5 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::fmt;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -24,6 +25,11 @@ pub struct AppConfig {
     pub budgets: Vec<BudgetConfig>,
     #[serde(default)]
     pub observability: ObservabilityConfig,
+    /// Gateway keys to seed into the metadata store at boot and on every
+    /// successful hot reload. These are managed declaratively — the Admin
+    /// API refuses to revoke or modify them.
+    #[serde(default)]
+    pub gateway_keys: Vec<GatewayKeyConfig>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -159,16 +165,21 @@ fn default_l2_max_size_mb() -> u64 {
 
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct AdminConfig {
-    /// Name of the env var that holds the root admin token. The gateway
-    /// will read it at startup; if empty, admin API is disabled.
-    #[serde(default = "default_root_token_env")]
-    pub root_token_env: String,
+    /// Source for the root admin token. Accepts:
+    /// - `""` (empty) → Admin API disabled.
+    /// - `env://VAR_NAME` → read from the named env var; empty/unset
+    ///   disables Admin API.
+    /// - anything else → literal token. Same threat model as inline
+    ///   `gateway_keys[].secret`: convenient for local dev, but the YAML
+    ///   file becomes a secret-bearing artifact.
+    #[serde(default = "default_root_token")]
+    pub root_token: String,
     #[serde(default)]
     pub password_login: bool,
 }
 
-fn default_root_token_env() -> String {
-    "GATEWAY_ROOT_TOKEN".into()
+fn default_root_token() -> String {
+    "env://GATEWAY_ROOT_TOKEN".into()
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -182,9 +193,11 @@ pub struct ProviderConfig {
     #[serde(default)]
     pub kind: Option<String>,
     pub base_url: String,
-    /// `env://VAR_NAME` to read directly from env, or `secret://<credential-id>`
-    /// to look up an encrypted credential from the metadata store.
-    pub credential_ref: String,
+    /// Upstream API key. Either `env://VAR_NAME` (read from env at boot)
+    /// or a literal token. Inline literals share the same threat model as
+    /// inline `gateway_keys[].secret` — fine for local dev, prefer env
+    /// references in production where the YAML may be reviewed broadly.
+    pub credential: String,
     #[serde(default)]
     pub headers: HashMap<String, String>,
 }
@@ -327,6 +340,59 @@ fn default_true() -> bool {
     true
 }
 
+/// A gateway API key declared in the config file. The secret can be a
+/// literal `sk-gw-{live,test}-...` string or `env://VAR_NAME` to read it
+/// from the environment at apply time.
+#[derive(Clone, Deserialize, Serialize)]
+pub struct GatewayKeyConfig {
+    /// Stable identifier — survives across reloads. Used as the row id
+    /// in `gateway_keys`, so logs/limits/budgets stay attached if the
+    /// secret rotates.
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub project_id: Option<String>,
+    pub secret: String,
+    #[serde(default)]
+    pub scopes: Vec<String>,
+}
+
+impl GatewayKeyConfig {
+    /// Resolve `secret` to the actual plaintext. `env://VAR` looks up the
+    /// env var; anything else is returned verbatim.
+    pub fn resolve_secret(&self) -> std::result::Result<String, String> {
+        if let Some(var) = self.secret.strip_prefix("env://") {
+            if var.is_empty() {
+                return Err("env:// reference is missing a var name".into());
+            }
+            std::env::var(var).map_err(|_| format!("env var '{var}' not set or empty"))
+        } else if self.secret.is_empty() {
+            Err("secret is empty".into())
+        } else {
+            Ok(self.secret.clone())
+        }
+    }
+}
+
+impl fmt::Debug for GatewayKeyConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Keep plaintext secrets out of debug output (and therefore out of
+        // any structured log that happens to render the full AppConfig).
+        let secret_repr = if self.secret.starts_with("env://") {
+            self.secret.as_str()
+        } else {
+            "<redacted>"
+        };
+        f.debug_struct("GatewayKeyConfig")
+            .field("id", &self.id)
+            .field("name", &self.name)
+            .field("project_id", &self.project_id)
+            .field("secret", &secret_repr)
+            .field("scopes", &self.scopes)
+            .finish()
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct TracingConfig {
     #[serde(default = "default_true")]
@@ -376,6 +442,18 @@ impl AppConfig {
             }
         }
         for route in &self.routes {
+            if route
+                .match_
+                .namespace
+                .as_deref()
+                .map(str::is_empty)
+                .unwrap_or(true)
+            {
+                return Err(GatewayError::BadRequest(format!(
+                    "route for primary.provider '{}' must declare match.namespace",
+                    route.primary.provider
+                )));
+            }
             if !self.providers.contains_key(&route.primary.provider) {
                 return Err(GatewayError::BadRequest(format!(
                     "route references unknown provider: {}",
@@ -387,6 +465,45 @@ impl AppConfig {
                     return Err(GatewayError::BadRequest(format!(
                         "fallback references unknown provider: {}",
                         fb.provider
+                    )));
+                }
+            }
+        }
+        let mut seen_ids: HashSet<&str> = HashSet::new();
+        for k in &self.gateway_keys {
+            if k.id.trim().is_empty() {
+                return Err(GatewayError::BadRequest(
+                    "gateway_keys[].id must be non-empty".into(),
+                ));
+            }
+            if !seen_ids.insert(k.id.as_str()) {
+                return Err(GatewayError::BadRequest(format!(
+                    "gateway_keys[].id '{}' is declared more than once",
+                    k.id
+                )));
+            }
+            if k.name.trim().is_empty() {
+                return Err(GatewayError::BadRequest(format!(
+                    "gateway_keys[id={}].name must be non-empty",
+                    k.id
+                )));
+            }
+            if k.secret.is_empty() {
+                return Err(GatewayError::BadRequest(format!(
+                    "gateway_keys[id={}].secret must be non-empty",
+                    k.id
+                )));
+            }
+            // For inline plaintext we can check the wire format up front.
+            // env:// references are checked when the var is resolved (at
+            // apply time), so a temporarily-unset var doesn't break load.
+            if !k.secret.starts_with("env://") {
+                let prefix_ok = k.secret.starts_with("sk-gw-live-")
+                    || k.secret.starts_with("sk-gw-test-");
+                if !prefix_ok {
+                    return Err(GatewayError::BadRequest(format!(
+                        "gateway_keys[id={}].secret must start with 'sk-gw-live-' or 'sk-gw-test-' (or use env://VAR)",
+                        k.id
                     )));
                 }
             }
@@ -411,7 +528,7 @@ storage:
 providers:
   openai:
     base_url: https://api.openai.com
-    credential_ref: env://X
+    credential: env://X
 "#;
         let cfg = AppConfig::load_from_str(yaml).expect("valid");
         // No explicit kind — falls back to the providers-map key.
@@ -427,7 +544,7 @@ providers:
   doubao:
     kind: openai
     base_url: https://ark.example
-    credential_ref: env://X
+    credential: env://X
 "#;
         let cfg = AppConfig::load_from_str(yaml).expect("valid");
         assert_eq!(cfg.providers["doubao"].kind.as_deref(), Some("openai"));
@@ -442,7 +559,7 @@ providers:
   weird:
     kind: gemini-but-typo
     base_url: https://example
-    credential_ref: env://X
+    credential: env://X
 "#;
         let err = AppConfig::load_from_str(yaml).expect_err("should fail");
         let msg = format!("{err}");
@@ -458,7 +575,7 @@ storage:
 providers:
   doubao:
     base_url: https://example
-    credential_ref: env://X
+    credential: env://X
 "#;
         let err = AppConfig::load_from_str(yaml).expect_err("should fail");
         let msg = format!("{err}");

@@ -36,10 +36,10 @@ docker compose up -d
 
 | 变量 | 说明 |
 | --- | --- |
-| `GATEWAY_MASTER_KEY` | base64 编码 32 字节。**所有加密凭证依赖它**。生成: `openssl rand -base64 32`。 |
-| `GATEWAY_ROOT_TOKEN` | Admin API 初始凭证。生成: `openssl rand -hex 32`。可改名,通过 `admin.root_token_env` 指定。 |
+| `GATEWAY_MASTER_KEY` | base64 编码 32 字节。Gateway Key 的 BLAKE3 keyed-hash 和 Admin JWT 都靠它。生成: `openssl rand -base64 32`。 |
+| `GATEWAY_ROOT_TOKEN` | Admin API 初始凭证。生成: `openssl rand -hex 32`。变量名可改,通过 `admin.root_token: env://<NAME>` 指定。 |
 
-上游凭证按 YAML 中 `credential_ref` 决定:`env://VAR` 引用的变量需要导出;`secret://<id>` 引用的不需要(已加密落库)。
+上游凭证按 YAML 中 `credential` 决定:`env://VAR` 引用环境变量,任何其他字符串当字面量直接用。
 
 ## Kubernetes 提示
 
@@ -64,10 +64,9 @@ docker compose up -d
 
 目前**没有内置轮换机制**。要换 master key 必须:
 
-1. 用旧 key 启动,通过 Admin API 把 `secret://` 引用导出为明文(或临时改成 `env://`)。
-2. 停服,导出 DB。
-3. 用新 key 启动空库,重新创建 admin、key、credentials。
-4. 把日志库恢复(日志不加密)。
+1. 停服,导出 DB。
+2. 用新 key 启动空库,重新创建 admin 用户和 gateway key(已签发的 Admin JWT 也会失效)。
+3. 把日志库恢复(日志不加密)。
 
 因此生产场景**强烈建议在密钥管理系统(AWS KMS / GCP Secret Manager / Vault)里存 master key**,并把它视为同等级别的根密钥。
 

@@ -181,15 +181,16 @@ async function reloadKeys() {
   try {
     const rows = await api("/admin/keys");
     const html = rows.length === 0 ? `<div class="muted">No keys yet. Create one above.</div>` :
-      `<table><thead><tr><th>Name</th><th>Prefix</th><th>Last 4</th><th>Status</th><th>Created</th><th>Last used</th><th></th></tr></thead>
+      `<table><thead><tr><th>Name</th><th>Origin</th><th>Prefix</th><th>Last 4</th><th>Status</th><th>Created</th><th>Last used</th><th></th></tr></thead>
        <tbody>${rows.map(r=>`<tr>
          <td>${escapeHtml(r.name)}</td>
+         <td>${r.origin==='config'?`<span class="pill" title="Managed by config file">config</span>`:`<span class="muted">admin</span>`}</td>
          <td><span class="code">${escapeHtml(r.prefix)}</span></td>
          <td><span class="code">…${escapeHtml(r.last4)}</span></td>
          <td><span class="pill ${r.status==='active'?'ok':'err'}">${r.status}</span></td>
          <td class="muted">${fmtTs(r.created_at)}</td>
          <td class="muted">${fmtTs(r.last_used_at)}</td>
-         <td>${r.status==='active'?`<button class="danger secondary" onclick="window.revoke('${r.id}')">Revoke</button>`:''}</td>
+         <td>${r.status==='active' && r.origin!=='config'?`<button class="danger secondary" onclick="window.revoke('${r.id}')">Revoke</button>`:''}</td>
        </tr>`).join("")}</tbody></table>`;
     $("#ktbl").innerHTML = html;
   } catch (e) { $("#ktbl").innerHTML = `<div class="status-msg">${escapeHtml(e.message)}</div>`; }
@@ -222,6 +223,7 @@ async function viewLogs() {
       <div class="toolbar">
         <input id="fprov" placeholder="namespace (e.g. openai)">
         <input id="fmodel" placeholder="model">
+        <select id="fkey"><option value="">any key</option></select>
         <select id="fstatus">
           <option value="">any status</option>
           <option value="success">success</option>
@@ -233,13 +235,30 @@ async function viewLogs() {
       </div>
       <div class="panel"><div id="ltbl">Loading…</div></div>
     </main>`;
+  await populateKeyFilter();
   await reloadLogs();
+}
+
+async function populateKeyFilter() {
+  const sel = $("#fkey");
+  if (!sel) return;
+  try {
+    const rows = await api("/admin/keys");
+    for (const k of rows) {
+      const label = `${k.name} (${k.prefix}…${k.last4})${k.status === 'active' ? '' : ' [' + k.status + ']'}`;
+      const opt = document.createElement("option");
+      opt.value = k.id;
+      opt.textContent = label;
+      sel.appendChild(opt);
+    }
+  } catch (_) { /* leave the filter as just "any key" if listing fails */ }
 }
 
 window.reloadLogs = async () => {
   const params = new URLSearchParams();
   const p = $("#fprov").value.trim(); if (p) params.set("namespace", p);
   const m = $("#fmodel").value.trim(); if (m) params.set("model", m);
+  const k = $("#fkey").value; if (k) params.set("gateway_key_id", k);
   const s = $("#fstatus").value; if (s) params.set("status", s);
   params.set("limit", "100");
   try {

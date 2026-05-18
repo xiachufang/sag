@@ -95,19 +95,30 @@ pub async fn proxy_handler(
         }
     };
 
-    // Resolve the route for this URL namespace. The chain falls back to
-    // a primary-only chain when no explicit route is defined; in that
-    // case the URL namespace doubles as the upstream provider key.
+    // Resolve the route for this URL namespace. An unknown namespace is
+    // a configuration error, not "use namespace as provider" — refuse
+    // explicitly so misrouted clients fail loud instead of accidentally
+    // hitting an arbitrary upstream.
     let route = find_route(&config, &namespace, request_model.as_deref());
-    let chain = match &route {
-        Some(r) => ProviderChain::from_route(r),
-        None => ProviderChain::primary_only(&namespace),
+    let route = match route {
+        Some(r) => r,
+        None => {
+            log.set_status("gateway_error", Some(404));
+            log.set_timing(started.elapsed().as_millis() as i64, 0, 0);
+            log.set_error(format!("no route for namespace '{namespace}'"));
+            log.submit(&state.stores.logs).await;
+            drop(permit);
+            return Err(ApiError::Gateway(GatewayError::NoRoute(namespace.clone())));
+        }
     };
+    let chain = ProviderChain::from_route(route);
 
     // Parse caching policy from route + request headers.
-    let cache_policy = route.and_then(|r| {
-        CachePolicy::from_headers(&headers, r.cache.enabled, Duration::from_secs(r.cache.ttl))
-    });
+    let cache_policy = CachePolicy::from_headers(
+        &headers,
+        route.cache.enabled,
+        Duration::from_secs(route.cache.ttl),
+    );
     let body_is_cacheable_shape = cache_policy
         .as_ref()
         .map(|p| p.body_is_cacheable(&body_bytes))
@@ -168,8 +179,7 @@ pub async fn proxy_handler(
         let cached_provider = cached.served_by.clone();
         let upstream_for_pricing = cached_provider
             .as_deref()
-            .or_else(|| route.map(|r| r.primary.provider.as_str()))
-            .unwrap_or(namespace.as_str());
+            .unwrap_or(route.primary.provider.as_str());
         let mut would_have = None;
         if let Some(model) = log.model().map(str::to_string) {
             if let Some(bd) = gateway_core::pricing::compute_cost(
@@ -266,8 +276,7 @@ pub async fn proxy_handler(
     let upstream_provider = result
         .fallback_used
         .clone()
-        .or_else(|| route.map(|r| r.primary.provider.clone()))
-        .unwrap_or_else(|| namespace.clone());
+        .unwrap_or_else(|| route.primary.provider.clone());
     let mut response_capture = BytesMut::new();
     let mut response_truncated = false;
     let mut log_holder = Some(log);
@@ -454,11 +463,11 @@ fn find_route<'a>(
 }
 
 fn route_matches(route: &RouteConfig, url_namespace: &str, model: Option<&str>) -> bool {
-    let expected_ns = route
-        .match_
-        .namespace
-        .as_deref()
-        .unwrap_or(route.primary.provider.as_str());
+    // A route without `match.namespace` matches nothing — config validation
+    // already rejects such routes at load time, this is just a belt.
+    let Some(expected_ns) = route.match_.namespace.as_deref() else {
+        return false;
+    };
     if expected_ns != url_namespace {
         return false;
     }
@@ -643,11 +652,12 @@ mod route_match_tests {
     }
 
     #[test]
-    fn namespace_defaults_to_primary_provider() {
-        // No explicit match.namespace → use primary.provider as the URL namespace.
+    fn route_without_namespace_matches_nothing() {
+        // Config validation rejects this case at load time; route_matches is
+        // the runtime belt that ensures we never match an empty namespace.
         let r = route("openai", None, None);
-        assert!(route_matches(&r, "openai", None));
-        assert!(!route_matches(&r, "anthropic", None));
+        assert!(!route_matches(&r, "openai", None));
+        assert!(!route_matches(&r, "", None));
     }
 
     #[test]
@@ -660,7 +670,7 @@ mod route_match_tests {
 
     #[test]
     fn model_prefix_requires_a_model() {
-        let r = route("openai", None, Some("gpt-"));
+        let r = route("openai", Some("openai"), Some("gpt-"));
         assert!(route_matches(&r, "openai", Some("gpt-4o-mini")));
         assert!(!route_matches(&r, "openai", Some("o1-preview")));
         assert!(!route_matches(&r, "openai", None));
@@ -689,11 +699,12 @@ mod route_match_tests {
             limits: vec![],
             budgets: vec![],
             observability: Default::default(),
+            gateway_keys: vec![],
         };
         // More specific: only matches gpt- models.
-        cfg.routes.push(route("openai", None, Some("gpt-")));
+        cfg.routes.push(route("openai", Some("openai"), Some("gpt-")));
         // Catch-all for any other openai request.
-        cfg.routes.push(route("openai", None, None));
+        cfg.routes.push(route("openai", Some("openai"), None));
 
         // gpt-4o-mini hits the specific entry.
         let r = find_route(&cfg, "openai", Some("gpt-4o-mini")).unwrap();

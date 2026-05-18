@@ -14,28 +14,28 @@ storage:
     l2_max_size_mb: 1024
 
 admin:
-  root_token_env: GATEWAY_ROOT_TOKEN
+  root_token: env://GATEWAY_ROOT_TOKEN
   password_login: true
 
 providers:
   openai:
     base_url: https://api.openai.com
-    credential_ref: env://OPENAI_API_KEY
+    credential: env://OPENAI_API_KEY
   doubao:
     kind: openai
     base_url: https://ark.cn-beijing.volces.com/api/v3
-    credential_ref: env://DOUBAO_API_KEY
+    credential: env://DOUBAO_API_KEY
   openrouter:
     kind: openai
     base_url: https://openrouter.ai/api/v1
-    credential_ref: env://OPENROUTER_API_KEY
+    credential: env://OPENROUTER_API_KEY
   azure:
     kind: openai
     base_url: https://prod.openai.azure.com
-    credential_ref: env://AZURE_API_KEY
+    credential: env://AZURE_API_KEY
   anthropic:
     base_url: https://api.anthropic.com
-    credential_ref: env://ANTHROPIC_API_KEY
+    credential: env://ANTHROPIC_API_KEY
 
 routes:
   - match:
@@ -64,6 +64,17 @@ routes:
     fallbacks:
       - provider: openai
         trigger: [upstream_5xx, timeout]
+
+# Declaratively-managed gateway keys. The Admin API refuses to revoke
+# anything in this list — remove the entry here and reload to drop it.
+# gateway_keys:
+#   - id: prod-svc
+#     name: prod-svc
+#     secret: env://PROD_SVC_GATEWAY_KEY
+#   - id: local-dev
+#     name: local-dev
+#     secret: sk-gw-test-replace-with-real-32-char-secret
+
 limits:
   - target: { type: key, id: "*" }
     rpm: 1000

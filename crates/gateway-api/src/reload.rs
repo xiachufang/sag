@@ -7,20 +7,38 @@ use notify::{Event, RecursiveMode, Watcher};
 use tokio::sync::mpsc;
 
 use gateway_core::config::AppConfig;
+use gateway_core::security::MasterKey;
+use gateway_storage::traits::MetadataStore;
+
+use crate::seed_keys;
+
+/// Re-sync hooks invoked after every successful hot reload. They are
+/// fire-and-forget — failures are logged, not propagated, so a broken env
+/// var on disk doesn't disable the watcher.
+#[derive(Clone)]
+pub struct ReloadDeps {
+    pub metadata: Arc<dyn MetadataStore>,
+    pub master_key: Arc<MasterKey>,
+    pub default_project_id: String,
+}
 
 /// Spawn a background task that watches the config file and atomically
 /// swaps the [`AppConfig`] in `target` whenever the file changes (with a
 /// short debounce). Only fields safe to live-reload are honored —
 /// providers, listen address, storage backends, etc. require a restart.
-pub fn spawn(path: PathBuf, target: Arc<ArcSwap<AppConfig>>) {
+pub fn spawn(path: PathBuf, target: Arc<ArcSwap<AppConfig>>, deps: ReloadDeps) {
     tokio::spawn(async move {
-        if let Err(e) = run(path, target).await {
+        if let Err(e) = run(path, target, deps).await {
             tracing::warn!(error = %e, "config watcher exited");
         }
     });
 }
 
-async fn run(path: PathBuf, target: Arc<ArcSwap<AppConfig>>) -> anyhow::Result<()> {
+async fn run(
+    path: PathBuf,
+    target: Arc<ArcSwap<AppConfig>>,
+    deps: ReloadDeps,
+) -> anyhow::Result<()> {
     let (tx, mut rx) = mpsc::channel::<()>(8);
     let watch_path = path.clone();
     let _watcher = std::thread::spawn(move || {
@@ -48,16 +66,26 @@ async fn run(path: PathBuf, target: Arc<ArcSwap<AppConfig>>) -> anyhow::Result<(
                 else => break,
             }
         }
-        try_reload(&path, &target).await;
+        try_reload(&path, &target, &deps).await;
     }
     Ok(())
 }
 
-async fn try_reload(path: &Path, target: &Arc<ArcSwap<AppConfig>>) {
+async fn try_reload(path: &Path, target: &Arc<ArcSwap<AppConfig>>, deps: &ReloadDeps) {
     match AppConfig::load_from_path(path) {
         Ok(new_cfg) => {
             let old = target.load_full();
             let warn = warn_unsafe_changes(&old, &new_cfg);
+            // Sync seeded keys *before* publishing the new config so a
+            // failure here doesn't leave authenticators referencing keys
+            // we never wrote. apply_from_config logs and counts on error.
+            seed_keys::apply_from_config(
+                &deps.metadata,
+                &deps.master_key,
+                &deps.default_project_id,
+                &new_cfg,
+            )
+            .await;
             target.store(Arc::new(new_cfg));
             metrics::counter!("gateway_config_reload_total").increment(1);
             tracing::info!(path = %path.display(), warn = %warn, "config hot-reloaded");

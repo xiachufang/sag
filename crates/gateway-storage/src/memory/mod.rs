@@ -20,7 +20,6 @@ pub struct MemoryMetadataStore {
 struct MemMeta {
     projects: HashMap<String, Project>,
     keys: HashMap<String, GatewayKeyRow>,
-    creds: HashMap<String, ProviderCredential>,
     routes: HashMap<String, (RoutesConfig, i64)>,
     budgets: HashMap<String, Budget>,
     admins: HashMap<String, AdminUser>,
@@ -89,6 +88,7 @@ impl MetadataStore for MemoryMetadataStore {
             last_used_at: None,
             created_at: now_ms(),
             revoked_at: None,
+            origin: k.origin,
         };
         self.state.lock().unwrap().keys.insert(k.id, row.clone());
         Ok(row)
@@ -104,6 +104,10 @@ impl MetadataStore for MemoryMetadataStore {
             .filter(|k| k.project_id == project_id)
             .cloned()
             .collect())
+    }
+
+    async fn get_key(&self, id: &str) -> Result<Option<GatewayKeyRow>> {
+        Ok(self.state.lock().unwrap().keys.get(id).cloned())
     }
 
     async fn find_key_by_hash(&self, hash: &[u8]) -> Result<Option<GatewayKeyRow>> {
@@ -136,28 +140,62 @@ impl MetadataStore for MemoryMetadataStore {
         Ok(())
     }
 
-    async fn put_provider_credential(&self, c: ProviderCredential) -> Result<()> {
-        self.state.lock().unwrap().creds.insert(c.id.clone(), c);
-        Ok(())
-    }
-
-    async fn list_provider_credentials(&self, project_id: &str) -> Result<Vec<ProviderCredential>> {
-        Ok(self
-            .state
-            .lock()
-            .unwrap()
-            .creds
-            .values()
-            .filter(|c| c.project_id == project_id)
-            .cloned()
-            .collect())
-    }
-
-    async fn delete_provider_credential(&self, id: &str) -> Result<()> {
-        if self.state.lock().unwrap().creds.remove(id).is_none() {
-            return Err(StorageError::NotFound);
+    async fn upsert_seeded_key(&self, k: NewGatewayKey) -> Result<GatewayKeyRow> {
+        let mut g = self.state.lock().unwrap();
+        if let Some(existing) = g.keys.get(&k.id) {
+            if existing.origin != KEY_ORIGIN_CONFIG {
+                return Err(StorageError::Conflict(format!(
+                    "gateway key '{}' is admin-managed; rename the config-seeded key",
+                    k.id
+                )));
+            }
         }
-        Ok(())
+        let created_at = g
+            .keys
+            .get(&k.id)
+            .map(|r| r.created_at)
+            .unwrap_or_else(now_ms);
+        let last_used_at = g.keys.get(&k.id).and_then(|r| r.last_used_at);
+        let row = GatewayKeyRow {
+            id: k.id.clone(),
+            project_id: k.project_id,
+            name: k.name,
+            prefix: k.prefix,
+            hash: k.hash,
+            last4: k.last4,
+            scopes: k.scopes,
+            status: "active".into(),
+            expires_at: k.expires_at,
+            last_used_at,
+            created_at,
+            revoked_at: None,
+            origin: KEY_ORIGIN_CONFIG.into(),
+        };
+        g.keys.insert(k.id, row.clone());
+        Ok(row)
+    }
+
+    async fn prune_seeded_keys_not_in(
+        &self,
+        project_id: &str,
+        keep_ids: &[String],
+    ) -> Result<u64> {
+        let mut g = self.state.lock().unwrap();
+        let to_remove: Vec<String> = g
+            .keys
+            .values()
+            .filter(|k| {
+                k.project_id == project_id
+                    && k.origin == KEY_ORIGIN_CONFIG
+                    && !keep_ids.iter().any(|id| id == &k.id)
+            })
+            .map(|k| k.id.clone())
+            .collect();
+        let removed = to_remove.len() as u64;
+        for id in to_remove {
+            g.keys.remove(&id);
+        }
+        Ok(removed)
     }
 
     async fn upsert_routes(&self, project_id: &str, cfg: RoutesConfig, version: i64) -> Result<()> {

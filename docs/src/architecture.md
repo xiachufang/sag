@@ -79,12 +79,12 @@ L2:
 
 ## 凭证解析
 
-`provider.credential_ref` 在每次构造 forward request 时解析:
+`provider.credential` 在构造 proxy engine 时一次性解析,结果缓存在 `ResolvedProvider.api_key`:
 
-- `env://VAR_NAME` — `std::env::var`,缺失则启动时就会因校验失败拒绝。
-- `secret://<credential-id>` — 从 `MetadataStore` 取出加密 blob,用 master key 走 AES-256-GCM 解密。
+- `env://VAR_NAME` — `std::env::var`,变量未设直接报启动失败。
+- 任何其他字符串 — 当作字面量 token 用,不做任何转换。
 
-两种方式都在每次请求时执行,因此切换凭证不需要重启。
+凭证存活到下次进程重启;轮换上游 key 需要改 YAML 或环境变量后重启 / 重载 provider。
 
 ## 关键非目标
 

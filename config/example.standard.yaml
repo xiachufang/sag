@@ -15,19 +15,20 @@ storage:
     l2_max_size_mb: 1024
 
 admin:
-  root_token_env: GATEWAY_ROOT_TOKEN
+  root_token: env://GATEWAY_ROOT_TOKEN
   password_login: true
 
 providers:
   openai:
     base_url: https://api.openai.com
-    credential_ref: env://OPENAI_API_KEY
+    credential: env://OPENAI_API_KEY
   anthropic:
     base_url: https://api.anthropic.com
-    credential_ref: env://ANTHROPIC_API_KEY
+    credential: env://ANTHROPIC_API_KEY
 
 routes:
   - match:
+      namespace: openai
       model_prefix: gpt-
     primary:
       provider: openai
@@ -40,6 +41,13 @@ routes:
     fallbacks:
       - provider: anthropic
         trigger: [upstream_5xx, timeout]
+
+# Declaratively-managed gateway keys. The Admin API refuses to revoke
+# anything in this list — remove the entry here and reload to drop it.
+# gateway_keys:
+#   - id: prod-svc
+#     name: prod-svc
+#     secret: env://PROD_SVC_GATEWAY_KEY
 
 limits:
   - target: { type: key, id: "*" }

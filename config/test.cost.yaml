@@ -8,15 +8,16 @@ storage:
     path: ./data/gateway-cost.db
 
 admin:
-  root_token_env: GATEWAY_ROOT_TOKEN
+  root_token: env://GATEWAY_ROOT_TOKEN
 
 providers:
   openai:
     base_url: http://127.0.0.1:18181
-    credential_ref: env://OPENAI_API_KEY
+    credential: env://OPENAI_API_KEY
 
 routes:
-  - primary: { provider: openai }
+  - match: { namespace: openai }
+    primary: { provider: openai }
     cache: { enabled: false, ttl: 0 }
     retry: { max_attempts: 1, initial_backoff_ms: 100 }
 

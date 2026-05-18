@@ -15,6 +15,12 @@ pub struct NewProject {
     pub name: String,
 }
 
+/// Where the key came from. Admin-created keys can be revoked through the
+/// Admin API; config-seeded keys are managed declaratively via the YAML
+/// file and cannot be revoked at runtime.
+pub const KEY_ORIGIN_ADMIN: &str = "admin";
+pub const KEY_ORIGIN_CONFIG: &str = "config";
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GatewayKeyRow {
     pub id: String,
@@ -29,6 +35,12 @@ pub struct GatewayKeyRow {
     pub last_used_at: Option<Timestamp>,
     pub created_at: Timestamp,
     pub revoked_at: Option<Timestamp>,
+    #[serde(default = "default_origin")]
+    pub origin: String, // admin | config
+}
+
+fn default_origin() -> String {
+    KEY_ORIGIN_ADMIN.into()
 }
 
 #[derive(Debug, Clone)]
@@ -41,17 +53,7 @@ pub struct NewGatewayKey {
     pub last4: String,
     pub scopes: Vec<String>,
     pub expires_at: Option<Timestamp>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ProviderCredential {
-    pub id: String,
-    pub project_id: String,
-    pub provider: String,
-    pub name: String,
-    pub encrypted_key: Vec<u8>,
-    pub status: String,
-    pub created_at: Timestamp,
+    pub origin: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

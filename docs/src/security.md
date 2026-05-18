@@ -2,18 +2,18 @@
 
 ## Master Key
 
-启动时从环境变量 `GATEWAY_MASTER_KEY` 读入,base64 编码的 32 字节。三处用途:
+启动时从环境变量 `GATEWAY_MASTER_KEY` 读入,base64 编码的 32 字节。两处用途:
 
-1. **AES-256-GCM 加密落库的供应商凭证**(`secret://` 引用的目标)。
-2. **BLAKE3 keyed-hash 派生 Gateway API Key 的 hash**(数据库里只存 hash)。
-3. **HS256 签名 Admin JWT**。
+1. **BLAKE3 keyed-hash 派生 Gateway API Key 的 hash**(数据库里只存 hash)。
+2. **HS256 签名 Admin JWT**。
 
-只要 master key 不泄漏,数据库被拷走也无法解出凭证,也无法伪造 token 或 Key。
+只要 master key 不泄漏,数据库被拷走也无法伪造 token 或反推 Gateway Key 明文。
 
 **风险面**:
 
-- 丢失 master key → 所有 `secret://` 凭证、所有 Admin JWT、所有 Gateway Key 全部作废。
-- 泄漏 master key → 攻击者只要拿到数据库,就能解出明文凭证、伪造 token、构造可被验证通过的 Gateway Key。
+- 丢失 master key → 所有 Admin JWT 失效、所有 Gateway Key 无法再被验证(需重建)。
+- 泄漏 master key → 攻击者拿到数据库后能伪造 Admin JWT、构造可被验证通过的 Gateway Key。
+- 上游供应商凭证(`providers.<x>.credential`)不进数据库,所以这里跟它没关系 —— 那部分依赖的是 YAML / 环境变量本身的保护。
 
 强烈建议从 KMS/Vault 注入,本地不留副本,且不写进任何配置文件或镜像。
 
@@ -27,8 +27,9 @@
 - **落库**:`hash = blake3::keyed_hash(master_key, plaintext_bytes)`,32 字节,只存 hash + 前缀 + last4。
 - **验证**(`gateway_key.rs:90`):接收到的明文同样 hash 后,用 `subtle::ConstantTimeEq` 常时间比较。
 - **状态**:`active` / `revoked`,撤销是软删,可在 Admin API 看到。
+- **来源**(`origin` 列):`admin`(`POST /admin/keys` 创建,可撤销)或 `config`(配置文件 `gateway_keys[]` 预置,**不能从 Admin 撤销**,只能从 YAML 删条目再 reload)。
 
-Key 创建后明文**只在 HTTP 响应里出现一次**,不会再次返回。
+Key 创建后明文**只在 HTTP 响应里出现一次**,不会再次返回。预置 key 的明文写在 YAML 里就是磁盘留底,落库前同样会被 hash —— 不留原文,但配置文件本身要做好权限管控,或改用 `secret: env://VAR_NAME` 形态从环境变量注入。详见 [配置参考 > gateway_keys](./configuration.md#gateway_keys)。
 
 ## Admin 鉴权
 
@@ -36,7 +37,11 @@ Key 创建后明文**只在 HTTP 响应里出现一次**,不会再次返回。
 
 ### Root Token
 
-从 `GATEWAY_ROOT_TOKEN` 环境变量读取的明文字符串(默认变量名,可通过 `admin.root_token_env` 改)。
+来源由 `admin.root_token` 决定:
+- 默认 `env://GATEWAY_ROOT_TOKEN`,从该环境变量读明文;
+- 写成 `env://<其他变量名>` 指向别的变量;
+- 直接写一个非 `env://` 开头的字符串,会被当成 token 字面量(本地开发方便,生产建议走 env://);
+- 留空则关闭 Admin API。
 
 - 直接放在 `Authorization: Bearer <token>` 中。
 - 常时间比较,无过期。
@@ -56,17 +61,14 @@ Key 创建后明文**只在 HTTP 响应里出现一次**,不会再次返回。
 
 密码用 Argon2 默认参数哈希后落库(`security/admin_auth.rs`)。校验失败统一返回 `unauthorized`,不暴露差异(防用户名枚举)。
 
-## 凭证落库加密
+## 上游凭证
 
-`POST /admin/providers/credentials` 提交的 `api_key` 走 AES-256-GCM:
+通过 YAML 中 `providers.<x>.credential` 注入。两种形态:
 
-```
-blob = nonce(12B) || ciphertext || tag(16B)
-```
+- `env://VAR_NAME` —— 启动时从该环境变量读取(推荐生产场景,凭证不进 YAML 文件,也不进 git)。
+- 任意其他字符串 —— 作为字面量直接用,适合本地开发或一次性试运行。
 
-nonce 每次写入随机生成。读取时(`security/credentials.rs:10-41`)检查 blob 长度 ≥ 12,小于即认为损坏,拒绝解密。
-
-YAML 中的 `credential_ref: secret://<id>` 在**每次请求**时都会解密一次(无缓存),便于通过 Admin API 轮换上游 key 而不需要重启。
+不再支持 `secret://<id>` 那条经过 Admin API + 数据库加密落库的路径。轮换上游 key 时直接改 env 或 YAML 然后让网关热重载 / 重启即可。
 
 ## 传输安全
 

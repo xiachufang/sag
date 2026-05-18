@@ -10,7 +10,7 @@ use tokio::sync::oneshot;
 use tower_http::trace::TraceLayer;
 
 use crate::routes::{
-    admin::{auth as admin_auth, budgets, cost, keys, logs, providers, routes_cfg},
+    admin::{auth as admin_auth, budgets, cost, keys, logs, routes_cfg},
     health, metrics, proxy,
 };
 use crate::state::AppState;
@@ -29,14 +29,6 @@ pub fn build_router(state: AppState) -> Router {
         .route("/keys", post(keys::create_key))
         .route("/keys", get(keys::list_keys))
         .route("/keys/:id", delete(keys::revoke_key))
-        .route(
-            "/providers/credentials",
-            post(providers::create_credential).get(providers::list_credentials),
-        )
-        .route(
-            "/providers/credentials/:id",
-            delete(providers::delete_credential),
-        )
         .route("/logs", get(logs::list_logs))
         .route("/logs/:id", get(logs::get_log))
         .route("/routes", get(routes_cfg::get_routes))

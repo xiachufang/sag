@@ -1,11 +1,7 @@
 use std::collections::HashMap;
-use std::sync::Arc;
-
-use gateway_storage::traits::MetadataStore;
 
 use crate::config::ProviderConfig;
 use crate::error::{GatewayError, Result};
-use crate::security::{decrypt_credential, MasterKey};
 
 pub mod anthropic;
 pub mod openai;
@@ -32,18 +28,20 @@ pub fn is_known_provider_kind(kind: &str) -> bool {
     matches!(kind, "openai" | "anthropic")
 }
 
-/// Resolve a provider's API key. Supports `env://VAR` (env lookup) and
-/// `secret://<credential-id>` (encrypted DB lookup, decrypted with the
-/// master key).
-pub async fn resolve_credential(
+/// Resolve a provider's API key. Accepts `env://VAR_NAME` (env lookup,
+/// with optional in-process overrides for tests) or any other literal
+/// string, which is used as the token verbatim.
+pub fn resolve_credential(
     cfg: &ProviderConfig,
     env_overrides: &HashMap<String, String>,
-    metadata: Option<&Arc<dyn MetadataStore>>,
-    master: Option<&MasterKey>,
-    project_id: &str,
 ) -> Result<String> {
-    let r = &cfg.credential_ref;
+    let r = &cfg.credential;
     if let Some(rest) = r.strip_prefix("env://") {
+        if rest.is_empty() {
+            return Err(GatewayError::Internal(
+                "provider credential env:// reference is missing a var name".into(),
+            ));
+        }
         env_overrides
             .get(rest)
             .cloned()
@@ -51,23 +49,11 @@ pub async fn resolve_credential(
             .ok_or_else(|| {
                 GatewayError::Internal(format!("env var {rest} not set for provider credential"))
             })
-    } else if let Some(id) = r.strip_prefix("secret://") {
-        let metadata = metadata
-            .ok_or_else(|| GatewayError::Internal("secret:// requires metadata store".into()))?;
-        let master =
-            master.ok_or_else(|| GatewayError::Internal("secret:// requires master key".into()))?;
-        let creds = metadata
-            .list_provider_credentials(project_id)
-            .await
-            .map_err(|e| GatewayError::Storage(e))?;
-        let row = creds
-            .into_iter()
-            .find(|c| c.id == id)
-            .ok_or_else(|| GatewayError::Internal(format!("credential {id} not found")))?;
-        decrypt_credential(master, &row.encrypted_key)
+    } else if r.is_empty() {
+        Err(GatewayError::Internal(
+            "provider credential is empty".into(),
+        ))
     } else {
-        Err(GatewayError::Internal(format!(
-            "unsupported credential_ref: {r}"
-        )))
+        Ok(r.clone())
     }
 }

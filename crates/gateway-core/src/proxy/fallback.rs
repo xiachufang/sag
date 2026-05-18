@@ -29,17 +29,6 @@ impl ProviderChainEntry {
 }
 
 impl ProviderChain {
-    pub fn primary_only(provider: &str) -> Self {
-        Self {
-            entries: vec![ProviderChainEntry {
-                provider: provider.to_string(),
-                model_override: None,
-                trigger: vec![],
-            }],
-            retry: RouteRetryConfig::default(),
-        }
-    }
-
     pub fn from_route(route: &RouteConfig) -> Self {
         let mut entries = Vec::with_capacity(route.fallbacks.len() + 1);
         entries.push(ProviderChainEntry::from_target(&route.primary));

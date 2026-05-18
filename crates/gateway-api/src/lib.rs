@@ -9,6 +9,7 @@ pub mod metrics;
 pub mod ratelimit;
 pub mod reload;
 pub mod routes;
+pub mod seed_keys;
 pub mod server;
 pub mod state;
 pub mod tokens;

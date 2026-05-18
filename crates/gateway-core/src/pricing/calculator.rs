@@ -53,9 +53,16 @@ fn round6(v: f64) -> f64 {
 mod tests {
     use super::*;
 
+    const TEST_CATALOG: &str = r#"{
+        "models": [
+            { "provider": "openai", "model": "gpt-4o-mini", "input_per_1k": 0.00015, "output_per_1k": 0.0006, "cached_input_per_1k": 0.000075 },
+            { "provider": "anthropic", "model": "claude-sonnet-4-6", "input_per_1k": 0.003, "output_per_1k": 0.015, "cached_input_per_1k": 0.0003 }
+        ]
+    }"#;
+
     #[test]
     fn compute_for_gpt_4o_mini() {
-        let cat = PricingCatalog::embedded();
+        let cat = PricingCatalog::from_str(TEST_CATALOG).unwrap();
         let bd = compute_cost(
             &cat,
             "openai",
@@ -74,7 +81,7 @@ mod tests {
 
     #[test]
     fn cached_input_rate_applied() {
-        let cat = PricingCatalog::embedded();
+        let cat = PricingCatalog::from_str(TEST_CATALOG).unwrap();
         let bd = compute_cost(
             &cat,
             "anthropic",

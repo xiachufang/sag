@@ -14,7 +14,7 @@ storage:
     l2_max_size_mb: 256
 
 admin:
-  root_token_env: GATEWAY_ROOT_TOKEN
+  root_token: env://GATEWAY_ROOT_TOKEN
   password_login: false
 
 providers:
@@ -23,13 +23,15 @@ providers:
   # /status/{code} (deterministic status code).
   openai:
     base_url: https://httpbin.org
-    credential_ref: env://OPENAI_API_KEY
+    credential: env://OPENAI_API_KEY
   anthropic:
     base_url: https://httpbin.org
-    credential_ref: env://ANTHROPIC_API_KEY
+    credential: env://ANTHROPIC_API_KEY
 
 routes:
-  - primary:
+  - match:
+      namespace: openai
+    primary:
       provider: openai
     cache:
       enabled: true

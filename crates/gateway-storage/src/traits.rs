@@ -13,13 +13,18 @@ pub trait MetadataStore: Send + Sync {
 
     async fn create_key(&self, k: NewGatewayKey) -> Result<GatewayKeyRow>;
     async fn list_keys(&self, project_id: &str) -> Result<Vec<GatewayKeyRow>>;
+    async fn get_key(&self, id: &str) -> Result<Option<GatewayKeyRow>>;
     async fn find_key_by_hash(&self, hash: &[u8]) -> Result<Option<GatewayKeyRow>>;
     async fn revoke_key(&self, id: &str) -> Result<()>;
     async fn touch_key_last_used(&self, id: &str, ts: Timestamp) -> Result<()>;
 
-    async fn put_provider_credential(&self, c: ProviderCredential) -> Result<()>;
-    async fn list_provider_credentials(&self, project_id: &str) -> Result<Vec<ProviderCredential>>;
-    async fn delete_provider_credential(&self, id: &str) -> Result<()>;
+    /// Insert or update a config-seeded key. Returns an error if a row with
+    /// the same id already exists with a non-`config` origin.
+    async fn upsert_seeded_key(&self, k: NewGatewayKey) -> Result<GatewayKeyRow>;
+
+    /// Delete config-seeded keys in the given project whose id is not in
+    /// `keep_ids`. Returns the number of pruned rows.
+    async fn prune_seeded_keys_not_in(&self, project_id: &str, keep_ids: &[String]) -> Result<u64>;
 
     async fn upsert_routes(&self, project_id: &str, cfg: RoutesConfig, version: i64) -> Result<()>;
     async fn load_routes(&self, project_id: &str) -> Result<Option<(RoutesConfig, i64)>>;

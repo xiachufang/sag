@@ -62,6 +62,7 @@ pub async fn create_key(
             last4: secret.last4.clone(),
             scopes: req.scopes,
             expires_at: req.expires_at,
+            origin: gateway_storage::models::KEY_ORIGIN_ADMIN.to_string(),
         })
         .await?;
 
@@ -86,6 +87,9 @@ pub struct KeySummary {
     pub created_at: i64,
     pub last_used_at: Option<i64>,
     pub expires_at: Option<i64>,
+    /// `admin` for Admin-API created keys, `config` for keys seeded from
+    /// the YAML config (which cannot be revoked at runtime).
+    pub origin: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -115,6 +119,7 @@ pub async fn list_keys(
                 created_at: r.created_at,
                 last_used_at: r.last_used_at,
                 expires_at: r.expires_at,
+                origin: r.origin,
             })
             .collect(),
     ))
@@ -125,6 +130,13 @@ pub async fn revoke_key(
     _principal: AdminPrincipal,
     Path(id): Path<String>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
+    if let Some(existing) = state.stores.metadata.get_key(&id).await? {
+        if existing.origin == gateway_storage::models::KEY_ORIGIN_CONFIG {
+            return Err(ApiError::BadRequest(format!(
+                "key '{id}' is managed by the config file; remove it from gateway_keys[] to revoke"
+            )));
+        }
+    }
     state.stores.metadata.revoke_key(&id).await?;
     Ok(Json(serde_json::json!({ "id": id, "status": "revoked" })))
 }

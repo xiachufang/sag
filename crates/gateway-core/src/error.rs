@@ -14,6 +14,9 @@ pub enum GatewayError {
     #[error("not found")]
     NotFound,
 
+    #[error("no route configured for namespace '{0}'")]
+    NoRoute(String),
+
     #[error("invalid request: {0}")]
     BadRequest(String),
 
@@ -51,6 +54,7 @@ impl GatewayError {
             GatewayError::Forbidden(_) => 403,
             GatewayError::RateLimited => 429,
             GatewayError::NotFound => 404,
+            GatewayError::NoRoute(_) => 404,
             GatewayError::BadRequest(_) => 400,
             GatewayError::ProviderUnknown(_) => 400,
             GatewayError::UpstreamTimeout => 504,
@@ -63,6 +67,7 @@ impl GatewayError {
         match self {
             GatewayError::Unauthorized | GatewayError::Forbidden(_) => "auth",
             GatewayError::RateLimited => "rate_limited",
+            GatewayError::NoRoute(_) => "not_found",
             GatewayError::BadRequest(_) | GatewayError::ProviderUnknown(_) => "bad_request",
             GatewayError::UpstreamTimeout => "timeout",
             GatewayError::UpstreamError { .. } => "upstream_error",

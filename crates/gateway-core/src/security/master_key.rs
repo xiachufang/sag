@@ -3,9 +3,9 @@ use base64::Engine;
 
 use crate::error::{GatewayError, Result};
 
-/// 32-byte master key used for AES-256-GCM credential encryption and as
-/// the HMAC secret for admin session tokens. Loaded from a single env var
-/// (base64-encoded) at startup.
+/// 32-byte master key used to BLAKE3 keyed-hash Gateway API Keys and to
+/// HMAC-sign Admin JWTs. Loaded from a single env var (base64-encoded)
+/// at startup.
 #[derive(Clone)]
 pub struct MasterKey(pub [u8; 32]);
 

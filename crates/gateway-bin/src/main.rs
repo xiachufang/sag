@@ -35,6 +35,14 @@ struct Cli {
         default_value = "config/example.lite.yaml"
     )]
     config: PathBuf,
+
+    /// Path to the pricing catalog JSON used for cost accounting.
+    #[arg(
+        long,
+        env = "GATEWAY_PRICING_CATALOG",
+        default_value = "pricing-catalog.json"
+    )]
+    pricing_catalog: PathBuf,
 }
 
 #[tokio::main]
@@ -51,24 +59,32 @@ async fn main() -> Result<()> {
 
     let master_key = load_master_key()?;
     let admin_signer = AdminTokenSigner::new(&master_key);
-    let admin_root_token = read_admin_token(&config);
+    let admin_root_token = read_admin_token(&config)?;
 
     let stores = build_stores(&config).await?;
     seed_default_project(&stores, &config.server.default_project_id).await?;
+    if let Err(e) = gateway_api::seed_keys::apply(
+        &stores.metadata,
+        &master_key,
+        &config.server.default_project_id,
+        &config.gateway_keys,
+    )
+    .await
+    {
+        return Err(anyhow!("config-seeded gateway keys could not be applied: {e}"));
+    }
 
-    let proxy = Arc::new(
-        ProxyEngine::new(
-            &config,
-            Some(stores.metadata.clone()),
-            Some(master_key.clone()),
-            &config.server.default_project_id,
-        )
-        .await
-        .context("failed to construct proxy engine")?,
-    );
+    let proxy = Arc::new(ProxyEngine::new(&config).context("failed to construct proxy engine")?);
 
     let config_arc = Arc::new(ArcSwap::from_pointee(config.clone()));
-    let pricing = Arc::new(PricingCatalog::embedded());
+    let pricing = Arc::new(
+        PricingCatalog::from_path(&cli.pricing_catalog).with_context(|| {
+            format!(
+                "failed to load pricing catalog {}",
+                cli.pricing_catalog.display()
+            )
+        })?,
+    );
     let budgets = Arc::new(BudgetManager::new(
         stores.counter.clone(),
         stores.metadata.clone(),
@@ -87,7 +103,15 @@ async fn main() -> Result<()> {
         budgets,
     };
 
-    gateway_api::reload::spawn(cli.config.clone(), state.config.clone());
+    gateway_api::reload::spawn(
+        cli.config.clone(),
+        state.config.clone(),
+        gateway_api::reload::ReloadDeps {
+            metadata: state.stores.metadata.clone(),
+            master_key: state.master_key.clone(),
+            default_project_id: state.default_project_id.clone(),
+        },
+    );
 
     let handle = serve(state, &config.server.bind).await?;
     tracing::info!(addr = %handle.addr, profile = %config.storage.profile_name(), "gateway listening");
@@ -111,13 +135,23 @@ fn init_tracing() {
         .init();
 }
 
-fn read_admin_token(config: &AppConfig) -> Option<String> {
-    let var = config.admin.root_token_env.as_str();
-    if var.is_empty() {
-        None
-    } else {
-        std::env::var(var).ok().filter(|v| !v.is_empty())
+fn read_admin_token(config: &AppConfig) -> Result<Option<String>> {
+    let raw = config.admin.root_token.trim();
+    if raw.is_empty() {
+        return Ok(None);
     }
+    if let Some(var) = raw.strip_prefix("env://") {
+        if var.is_empty() {
+            return Err(anyhow!(
+                "admin.root_token env reference is missing a var name"
+            ));
+        }
+        return Ok(std::env::var(var).ok().filter(|v| !v.is_empty()));
+    }
+    // Anything else is treated as the literal token. Same threat model as
+    // `gateway_keys[].secret` written inline — convenient for local dev,
+    // but the YAML file becomes a secret-bearing artifact.
+    Ok(Some(raw.to_string()))
 }
 
 fn load_master_key() -> Result<MasterKey> {

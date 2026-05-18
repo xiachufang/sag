@@ -1,6 +1,8 @@
 services:
   gateway:
-    build: .
+    build:
+      context: .
+      target: lite
     restart: unless-stopped
     environment:
       GATEWAY_ROOT_TOKEN: ${GATEWAY_ROOT_TOKEN:?set GATEWAY_ROOT_TOKEN before running compose up}
@@ -11,6 +13,7 @@ services:
     volumes:
       - ./data:/app/data
       - ./config:/app/config:ro
+      - ./pricing-catalog.json:/app/pricing-catalog.json:ro
     ports:
       - "8080:8080"
     command: ["--config", "/app/config/example.lite.yaml"]

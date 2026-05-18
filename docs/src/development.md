@@ -21,7 +21,7 @@ migrations/
 config/                # 示例 + 测试用 YAML
 docs/                  # mdBook 源(本目录)
 scripts/mock-openai.py # 集成测试用的 mock 上游
-pricing-catalog.json   # 内嵌定价表(模型 → 单价)
+pricing-catalog.json   # 默认定价表(模型 → 单价,启动时通过 --pricing-catalog 指定路径)
 ```
 
 ## 编译与运行
@@ -82,7 +82,7 @@ sqlx migrate run --source migrations/postgres --database-url postgres://gateway:
 
 ## 加新的供应商
 
-绝大多数情况下你**不需要写代码** —— 如果新供应商的 API 兼容 OpenAI 协议(豆包、DeepSeek、Groq、Together、Mistral、Azure OpenAI、vLLM、Ollama、LM Studio 等都属于这类),直接在 YAML 里加一条 `providers.<name>: { kind: openai, base_url: ..., credential_ref: ... }` 即可。具体写法见 [配置参考 > providers](./configuration.md#providers)。
+绝大多数情况下你**不需要写代码** —— 如果新供应商的 API 兼容 OpenAI 协议(豆包、DeepSeek、Groq、Together、Mistral、Azure OpenAI、vLLM、Ollama、LM Studio 等都属于这类),直接在 YAML 里加一条 `providers.<name>: { kind: openai, base_url: ..., credential: ... }` 即可。具体写法见 [配置参考 > providers](./configuration.md#providers)。
 
 **只有当上游使用完全不同的认证协议时**(既不是 OpenAI 也不是 Anthropic),才需要新建一个 auth adapter:
 

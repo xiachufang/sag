@@ -154,16 +154,17 @@
     "status": "active",
     "created_at": 1715760000,
     "last_used_at": 1715800000,
-    "expires_at": null
+    "expires_at": null,
+    "origin": "admin"
   }
 ]
 ```
 
-`status` 取值:`active` / `revoked`。
+`status` 取值:`active` / `revoked`。`origin` 取值:`admin`(由本 API 创建)或 `config`(由 `gateway_keys[]` 预置,见 [配置参考 > gateway_keys](./configuration.md#gateway_keys))。
 
 ### DELETE `/admin/keys/:id`
 
-撤销 Key(软删,`status` 变为 `revoked`)。
+撤销 Key(软删,`status` 变为 `revoked`)。`origin` 为 `config` 的 key 不能从这里撤销 —— 接口会返回 `400 bad_request`,需要在 YAML 里把这条记录删掉再 reload。
 
 权限:Any。
 
@@ -172,50 +173,6 @@
 ```json
 { "id": "key_...", "status": "revoked" }
 ```
-
----
-
-## 上游凭证 `/admin/providers/credentials`
-
-用于把上游 API Key 加密存到数据库,然后在 YAML 里用 `credential_ref: secret://<id>` 引用。
-
-### POST `/admin/providers/credentials`
-
-权限:Any。
-
-请求:
-
-```json
-{
-  "provider": "openai",
-  "name": "team-shared",
-  "api_key": "sk-...",
-  "project_id": "default"
-}
-```
-
-`api_key` 用 AES-256-GCM(随机 nonce)加密后落库,明文不再存在。
-
-响应:
-
-```json
-{
-  "id": "cred_...",
-  "project_id": "default",
-  "provider": "openai",
-  "name": "team-shared",
-  "status": "active",
-  "created_at": 1715760000
-}
-```
-
-### GET `/admin/providers/credentials`
-
-列出已存凭证(不返回明文)。可选 `project_id` 过滤。
-
-### DELETE `/admin/providers/credentials/:id`
-
-删除凭证。响应 `{"id":"cred_...","status":"deleted"}`。
 
 ---
 
@@ -342,18 +299,3 @@ for i in 1 2 3; do
 done
 ```
 
-注入一个加密凭证然后用 `secret://` 引用:
-
-```sh
-CRED_ID=$(curl -s -X POST http://localhost:8080/admin/providers/credentials \
-  -H "Authorization: Bearer $GATEWAY_ROOT_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"provider":"openai","name":"team","api_key":"sk-..."}' \
-  | jq -r .id)
-
-# 然后在 YAML 里:
-# providers:
-#   openai:
-#     base_url: https://api.openai.com
-#     credential_ref: secret://$CRED_ID
-```

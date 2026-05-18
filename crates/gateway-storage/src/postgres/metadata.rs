@@ -68,8 +68,8 @@ impl MetadataStore for PostgresMetadataStore {
         sqlx::query(
             r#"
             INSERT INTO gateway_keys
-                (id, project_id, name, prefix, hash, last4, scopes, status, expires_at, last_used_at, created_at, revoked_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, 'active', $8, NULL, $9, NULL)
+                (id, project_id, name, prefix, hash, last4, scopes, status, expires_at, last_used_at, created_at, revoked_at, origin)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, 'active', $8, NULL, $9, NULL, $10)
             "#,
         )
         .bind(&k.id)
@@ -81,6 +81,7 @@ impl MetadataStore for PostgresMetadataStore {
         .bind(&scopes_json)
         .bind(k.expires_at)
         .bind(created_at)
+        .bind(&k.origin)
         .execute(&self.pool)
         .await?;
 
@@ -97,6 +98,7 @@ impl MetadataStore for PostgresMetadataStore {
             last_used_at: None,
             created_at,
             revoked_at: None,
+            origin: k.origin,
         })
     }
 
@@ -104,7 +106,7 @@ impl MetadataStore for PostgresMetadataStore {
         let rows = sqlx::query(
             r#"
             SELECT id, project_id, name, prefix, hash, last4, scopes, status,
-                   expires_at, last_used_at, created_at, revoked_at
+                   expires_at, last_used_at, created_at, revoked_at, origin
               FROM gateway_keys
              WHERE project_id = $1
              ORDER BY created_at DESC
@@ -116,11 +118,26 @@ impl MetadataStore for PostgresMetadataStore {
         rows.into_iter().map(row_to_gateway_key).collect()
     }
 
+    async fn get_key(&self, id: &str) -> Result<Option<GatewayKeyRow>> {
+        let row = sqlx::query(
+            r#"
+            SELECT id, project_id, name, prefix, hash, last4, scopes, status,
+                   expires_at, last_used_at, created_at, revoked_at, origin
+              FROM gateway_keys
+             WHERE id = $1
+            "#,
+        )
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await?;
+        row.map(row_to_gateway_key).transpose()
+    }
+
     async fn find_key_by_hash(&self, hash: &[u8]) -> Result<Option<GatewayKeyRow>> {
         let row = sqlx::query(
             r#"
             SELECT id, project_id, name, prefix, hash, last4, scopes, status,
-                   expires_at, last_used_at, created_at, revoked_at
+                   expires_at, last_used_at, created_at, revoked_at, origin
               FROM gateway_keys
              WHERE hash = $1
             "#,
@@ -154,65 +171,86 @@ impl MetadataStore for PostgresMetadataStore {
         Ok(())
     }
 
-    async fn put_provider_credential(&self, c: ProviderCredential) -> Result<()> {
+    async fn upsert_seeded_key(&self, k: NewGatewayKey) -> Result<GatewayKeyRow> {
+        let scopes_json = serde_json::to_string(&k.scopes)?;
+        if let Some(existing) = sqlx::query("SELECT origin FROM gateway_keys WHERE id = $1")
+            .bind(&k.id)
+            .fetch_optional(&self.pool)
+            .await?
+        {
+            let origin: String = existing.get("origin");
+            if origin != KEY_ORIGIN_CONFIG {
+                return Err(StorageError::Conflict(format!(
+                    "gateway key '{}' is admin-managed; rename the config-seeded key",
+                    k.id
+                )));
+            }
+        }
+        let created_at = now_ms();
         sqlx::query(
             r#"
-            INSERT INTO provider_credentials (id, project_id, provider, name, encrypted_key, status, created_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            INSERT INTO gateway_keys
+                (id, project_id, name, prefix, hash, last4, scopes, status, expires_at, last_used_at, created_at, revoked_at, origin)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, 'active', $8, NULL, $9, NULL, $10)
             ON CONFLICT(id) DO UPDATE SET
-                provider = EXCLUDED.provider,
-                name = EXCLUDED.name,
-                encrypted_key = EXCLUDED.encrypted_key,
-                status = EXCLUDED.status
+                project_id = EXCLUDED.project_id,
+                name       = EXCLUDED.name,
+                prefix     = EXCLUDED.prefix,
+                hash       = EXCLUDED.hash,
+                last4      = EXCLUDED.last4,
+                scopes     = EXCLUDED.scopes,
+                status     = 'active',
+                expires_at = EXCLUDED.expires_at,
+                revoked_at = NULL
             "#,
         )
-        .bind(&c.id)
-        .bind(&c.project_id)
-        .bind(&c.provider)
-        .bind(&c.name)
-        .bind(&c.encrypted_key)
-        .bind(&c.status)
-        .bind(c.created_at)
+        .bind(&k.id)
+        .bind(&k.project_id)
+        .bind(&k.name)
+        .bind(&k.prefix)
+        .bind(&k.hash)
+        .bind(&k.last4)
+        .bind(&scopes_json)
+        .bind(k.expires_at)
+        .bind(created_at)
+        .bind(KEY_ORIGIN_CONFIG)
         .execute(&self.pool)
         .await?;
-        Ok(())
-    }
-
-    async fn list_provider_credentials(&self, project_id: &str) -> Result<Vec<ProviderCredential>> {
-        let rows = sqlx::query(
+        let row = sqlx::query(
             r#"
-            SELECT id, project_id, provider, name, encrypted_key, status, created_at
-              FROM provider_credentials
-             WHERE project_id = $1
-             ORDER BY created_at DESC
+            SELECT id, project_id, name, prefix, hash, last4, scopes, status,
+                   expires_at, last_used_at, created_at, revoked_at, origin
+              FROM gateway_keys
+             WHERE id = $1
             "#,
         )
-        .bind(project_id)
-        .fetch_all(&self.pool)
+        .bind(&k.id)
+        .fetch_one(&self.pool)
         .await?;
-        Ok(rows
-            .into_iter()
-            .map(|r| ProviderCredential {
-                id: r.get("id"),
-                project_id: r.get("project_id"),
-                provider: r.get("provider"),
-                name: r.get("name"),
-                encrypted_key: r.get("encrypted_key"),
-                status: r.get("status"),
-                created_at: r.get("created_at"),
-            })
-            .collect())
+        row_to_gateway_key(row)
     }
 
-    async fn delete_provider_credential(&self, id: &str) -> Result<()> {
-        let res = sqlx::query("DELETE FROM provider_credentials WHERE id = $1")
-            .bind(id)
-            .execute(&self.pool)
-            .await?;
-        if res.rows_affected() == 0 {
-            return Err(StorageError::NotFound);
+    async fn prune_seeded_keys_not_in(
+        &self,
+        project_id: &str,
+        keep_ids: &[String],
+    ) -> Result<u64> {
+        let mut qb = sqlx::QueryBuilder::<sqlx::Postgres>::new(
+            "DELETE FROM gateway_keys WHERE project_id = ",
+        );
+        qb.push_bind(project_id.to_string());
+        qb.push(" AND origin = ");
+        qb.push_bind(KEY_ORIGIN_CONFIG.to_string());
+        if !keep_ids.is_empty() {
+            qb.push(" AND id NOT IN (");
+            let mut sep = qb.separated(", ");
+            for id in keep_ids {
+                sep.push_bind(id.clone());
+            }
+            qb.push(")");
         }
-        Ok(())
+        let res = qb.build().execute(&self.pool).await?;
+        Ok(res.rows_affected())
     }
 
     async fn upsert_routes(&self, project_id: &str, cfg: RoutesConfig, version: i64) -> Result<()> {
@@ -394,6 +432,7 @@ fn row_to_gateway_key(r: sqlx::postgres::PgRow) -> Result<GatewayKeyRow> {
         last_used_at: r.get("last_used_at"),
         created_at: r.get("created_at"),
         revoked_at: r.get("revoked_at"),
+        origin: r.get("origin"),
     })
 }
 

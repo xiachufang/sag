@@ -33,7 +33,7 @@ Authorization: Bearer sk-gw-live-xxxxxxxxxxxx
 2. 检查 Key 状态(`active` / `revoked`)和 `expires_at`。
 3. 异步更新 `last_used_at`。
 
-不会把这个 header 透传给上游 —— 网关会把它换成 `providers.{name}.credential_ref` 解出的真实上游凭证。
+不会把这个 header 透传给上游 —— 网关会把它换成 `providers.{name}.credential` 解出的真实上游凭证。
 
 ## 请求体
 
@@ -77,7 +77,7 @@ Authorization: Bearer sk-gw-live-xxxxxxxxxxxx
 4. 成功响应若满足缓存条件(≤ 2 MB、状态 2xx),写回 KV;流式响应也会缓存,replay 时保留 chunk 边界。
 5. 写日志,返回响应。
 
-**没有匹配的路由时**(或 `routes` 为空),走 `primary_only` 链:仅主供应商、默认重试 3 次/500ms 退避、**缓存禁用**、无 fallback。
+**没有匹配的路由时**,网关直接返回 `404`(错误码 `not_found`),不会再把 namespace 当作 `providers` 表的 key 做兜底转发。想暴露 `/v1/<name>/...`,必须在 `routes[]` 里写一条对应的条目(最简写法 `- primary: { provider: <name> }`)。
 
 ## 响应头
 
@@ -97,7 +97,7 @@ Authorization: Bearer sk-gw-live-xxxxxxxxxxxx
 | --- | --- |
 | `401` | 缺少 `Authorization` 或 Key 无效 / 已撤销 / 已过期。 |
 | `402` | 命中 `budgets[].thresholds[].action: block`。 |
-| `404` | URL 中的 `{namespace}` 没有对应的 route,且 `providers` 表里也没有同名 key。 |
+| `404` | URL 中的 `{namespace}` 没有对应的 route。 |
 | `408` | 请求超时(`server.request_timeout_ms` 触发)。 |
 | `429` | 命中 `limits[]` 中的 RPM / TPM / 并发上限。 |
 | `502` | 上游所有重试 + fallback 都失败。 |

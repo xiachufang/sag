@@ -104,7 +104,7 @@ crates/
 └── gateway-ui/        # 内置管理 UI(打包后的静态文件)
 migrations/            # SQLite 和 Postgres 数据库迁移
 config/                # 示例配置
-pricing-catalog.json   # 内嵌定价表(供成本核算)
+pricing-catalog.json   # 默认定价表(供成本核算,启动时通过 --pricing-catalog / GATEWAY_PRICING_CATALOG 指定路径)
 scripts/mock-openai.py # 集成测试用的 mock 上游
 ```
 
