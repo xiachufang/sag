@@ -71,7 +71,7 @@ Authorization: Bearer sk-gw-live-xxxxxxxxxxxx
 
 `namespace` 是对外暴露的 URL 段,`primary.provider` 是 `providers` 表里的 key —— 是两个独立概念,允许同一个 namespace 在后端切换到不同 provider。详见 [配置参考 > routes](./configuration.md#routes)。命中后:
 
-1. 检查 `cache.enabled`,且请求体是确定性的(`temperature == 0` 且 `top_p >= 0.999`,或带 `X-Gateway-Cache-Force` 头),则查缓存,命中则直接返回,响应头加 `X-Gateway-Cache-Status: hit`。
+1. 检查 `cache.enabled`,且请求体是确定性的(`temperature == 0` 且 `top_p >= 0.999`,或路由配了 `cache.allow_nondeterministic: true`,或带 `X-Gateway-Cache-Force` 头),则查缓存,命中则直接返回,响应头加 `X-Gateway-Cache-Status: hit`。
 2. 否则按 `primary` 转发,失败重试至 `retry.max_attempts` 次。
 3. 仍失败且 `trigger` 命中 → 切到下一个 `fallbacks[]`。
 4. 成功响应若满足缓存条件(≤ 2 MB、状态 2xx),写回 KV;流式响应也会缓存,replay 时保留 chunk 边界。

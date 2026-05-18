@@ -118,6 +118,7 @@ pub async fn proxy_handler(
         &headers,
         route.cache.enabled,
         Duration::from_secs(route.cache.ttl),
+        route.cache.allow_nondeterministic,
     );
     let body_is_cacheable_shape = cache_policy
         .as_ref()

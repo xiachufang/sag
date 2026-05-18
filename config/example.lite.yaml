@@ -44,6 +44,7 @@ routes:
       provider: doubao
     cache:
       enabled: true
+      allow_nondeterministic: true
       ttl: 3600
     retry:
       max_attempts: 3
@@ -57,6 +58,7 @@ routes:
       provider: openrouter
     cache:
       enabled: true
+      allow_nondeterministic: true
       ttl: 3600
     retry:
       max_attempts: 3

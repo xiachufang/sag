@@ -65,7 +65,7 @@ L2:
 
 响应 body 超过 2 MB 不写缓存(`MAX_CACHEABLE_BODY_BYTES`),避免污染。
 
-流式响应也会被缓存:转发途中 chunk 被同时累积进 `cache_chunks`,流正常结束后整段写入 KV。命中时 `build_cached_response` 用 `Body::from_stream` 按原 chunk 边界 replay,所以 SSE 客户端看到的事件流跟首次一致。但缓存写入需要请求体确定性(`temperature == 0` 且 `top_p >= 0.999`),否则一律 bypass。
+流式响应也会被缓存:转发途中 chunk 被同时累积进 `cache_chunks`,流正常结束后整段写入 KV。命中时 `build_cached_response` 用 `Body::from_stream` 按原 chunk 边界 replay,所以 SSE 客户端看到的事件流跟首次一致。缓存写入默认需要请求体确定性(`temperature == 0` 且 `top_p >= 0.999`),否则一律 bypass;路由可设 `cache.allow_nondeterministic: true` 跳过此检查(等价于全局打开 `X-Gateway-Cache-Force`)。
 
 ## 重试 / 回退
 

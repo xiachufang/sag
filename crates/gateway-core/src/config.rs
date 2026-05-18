@@ -242,6 +242,11 @@ pub struct RouteCacheConfig {
     pub enabled: bool,
     #[serde(default = "default_cache_ttl")]
     pub ttl: u64,
+    /// When true, cache requests even when sampling parameters indicate
+    /// non-determinism (temperature != 0 or top_p < 0.999). The per-request
+    /// `X-Gateway-Cache-Force` header is ORed on top of this.
+    #[serde(default)]
+    pub allow_nondeterministic: bool,
 }
 
 fn default_cache_ttl() -> u64 {

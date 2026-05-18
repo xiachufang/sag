@@ -44,7 +44,7 @@ pub struct CachePolicy {
     /// Optional user-supplied cache-key bumper (header `X-Gateway-Cache-Scope`),
     /// distinct from the URL namespace used to scope the route itself.
     pub cache_scope: Option<String>,
-    pub allow_nondeterministic: bool, // X-Gateway-Cache-Force
+    pub allow_nondeterministic: bool, // route config OR X-Gateway-Cache-Force
 }
 
 impl CachePolicy {
@@ -54,6 +54,7 @@ impl CachePolicy {
         headers: &HeaderMap,
         route_enabled: bool,
         default_ttl: Duration,
+        route_allow_nondeterministic: bool,
     ) -> Option<Self> {
         if !route_enabled {
             return None;
@@ -79,11 +80,12 @@ impl CachePolicy {
             .get("x-gateway-cache-scope")
             .and_then(|v| v.to_str().ok())
             .map(|s| s.to_string());
-        let allow_nondeterministic = headers
+        let header_force = headers
             .get("x-gateway-cache-force")
             .and_then(|v| v.to_str().ok())
             .map(|s| matches!(s.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
             .unwrap_or(false);
+        let allow_nondeterministic = route_allow_nondeterministic || header_force;
         Some(Self {
             directive,
             ttl,
