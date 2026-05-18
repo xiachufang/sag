@@ -503,8 +503,8 @@ impl AppConfig {
             // env:// references are checked when the var is resolved (at
             // apply time), so a temporarily-unset var doesn't break load.
             if !k.secret.starts_with("env://") {
-                let prefix_ok = k.secret.starts_with("sk-gw-live-")
-                    || k.secret.starts_with("sk-gw-test-");
+                let prefix_ok =
+                    k.secret.starts_with("sk-gw-live-") || k.secret.starts_with("sk-gw-test-");
                 if !prefix_ok {
                     return Err(GatewayError::BadRequest(format!(
                         "gateway_keys[id={}].secret must start with 'sk-gw-live-' or 'sk-gw-test-' (or use env://VAR)",

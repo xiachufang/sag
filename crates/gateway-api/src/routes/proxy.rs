@@ -29,7 +29,7 @@ use crate::tokens::extract_token_usage;
 
 const MAX_LOG_BODY_BYTES: usize = 64 * 1024;
 const PROXY_BODY_CHANNEL: usize = 32;
-const MAX_CACHEABLE_BODY_BYTES: usize = 2 * 1024 * 1024; // 2 MB cap on cache writes
+const MAX_CACHEABLE_BODY_BYTES: usize = 20 * 1024 * 1024; // 20 MB cap on cache writes
 
 pub async fn proxy_handler(
     State(state): State<AppState>,
@@ -703,7 +703,8 @@ mod route_match_tests {
             gateway_keys: vec![],
         };
         // More specific: only matches gpt- models.
-        cfg.routes.push(route("openai", Some("openai"), Some("gpt-")));
+        cfg.routes
+            .push(route("openai", Some("openai"), Some("gpt-")));
         // Catch-all for any other openai request.
         cfg.routes.push(route("openai", Some("openai"), None));
 

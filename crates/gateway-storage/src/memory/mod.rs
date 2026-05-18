@@ -175,11 +175,7 @@ impl MetadataStore for MemoryMetadataStore {
         Ok(row)
     }
 
-    async fn prune_seeded_keys_not_in(
-        &self,
-        project_id: &str,
-        keep_ids: &[String],
-    ) -> Result<u64> {
+    async fn prune_seeded_keys_not_in(&self, project_id: &str, keep_ids: &[String]) -> Result<u64> {
         let mut g = self.state.lock().unwrap();
         let to_remove: Vec<String> = g
             .keys

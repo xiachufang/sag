@@ -21,7 +21,10 @@ pub async fn apply(
     let mut to_upsert: Vec<(GatewayKeyConfig, String, String)> = Vec::new();
     for k in keys {
         let plaintext = k.resolve_secret().map_err(|e| {
-            format!("gateway_keys[id={}].secret could not be resolved: {e}", k.id)
+            format!(
+                "gateway_keys[id={}].secret could not be resolved: {e}",
+                k.id
+            )
         })?;
         let prefix = parse_gateway_key(&plaintext).ok_or_else(|| {
             format!(
@@ -47,8 +50,14 @@ pub async fn apply(
             .clone()
             .unwrap_or_else(|| default_project_id.to_string());
         let hash = derive_hash(master_key, &plaintext);
-        let last4: String = plaintext.chars().rev().take(4).collect::<Vec<_>>()
-            .into_iter().rev().collect();
+        let last4: String = plaintext
+            .chars()
+            .rev()
+            .take(4)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect();
         metadata
             .upsert_seeded_key(NewGatewayKey {
                 id: k.id.clone(),
@@ -100,7 +109,14 @@ pub async fn apply_from_config(
     default_project_id: &str,
     config: &AppConfig,
 ) {
-    if let Err(e) = apply(metadata, master_key, default_project_id, &config.gateway_keys).await {
+    if let Err(e) = apply(
+        metadata,
+        master_key,
+        default_project_id,
+        &config.gateway_keys,
+    )
+    .await
+    {
         tracing::warn!(error = %e, "config-seeded gateway keys not applied");
         metrics::counter!("gateway_seeded_keys_error_total").increment(1);
     } else {

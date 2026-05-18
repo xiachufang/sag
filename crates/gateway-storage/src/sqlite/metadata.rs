@@ -238,15 +238,10 @@ impl MetadataStore for SqliteMetadataStore {
         row_to_gateway_key(row)
     }
 
-    async fn prune_seeded_keys_not_in(
-        &self,
-        project_id: &str,
-        keep_ids: &[String],
-    ) -> Result<u64> {
+    async fn prune_seeded_keys_not_in(&self, project_id: &str, keep_ids: &[String]) -> Result<u64> {
         let _w = self.write_lock.lock().await;
-        let mut qb = sqlx::QueryBuilder::<sqlx::Sqlite>::new(
-            "DELETE FROM gateway_keys WHERE project_id = ",
-        );
+        let mut qb =
+            sqlx::QueryBuilder::<sqlx::Sqlite>::new("DELETE FROM gateway_keys WHERE project_id = ");
         qb.push_bind(project_id.to_string());
         qb.push(" AND origin = ");
         qb.push_bind(KEY_ORIGIN_CONFIG.to_string());

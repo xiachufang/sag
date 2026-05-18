@@ -71,7 +71,9 @@ async fn main() -> Result<()> {
     )
     .await
     {
-        return Err(anyhow!("config-seeded gateway keys could not be applied: {e}"));
+        return Err(anyhow!(
+            "config-seeded gateway keys could not be applied: {e}"
+        ));
     }
 
     let proxy = Arc::new(ProxyEngine::new(&config).context("failed to construct proxy engine")?);
