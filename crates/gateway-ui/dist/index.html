@@ -57,6 +57,9 @@
   input, select { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; color: var(--text); font: inherit; }
   input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
   .toolbar { display: flex; gap: 10px; align-items: center; margin-bottom: 14px; flex-wrap: wrap; }
+  .range-field { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+  .range-field input[type=datetime-local] { color-scheme: dark; font-size: 12px; padding: 6px 8px; }
+  .logs-foot { padding: 14px 4px 2px; text-align: center; color: var(--muted); font-size: 12px; }
   .muted { color: var(--muted); }
   .code { font-family: ui-monospace, "SF Mono", Menlo, monospace; background: var(--code); padding: 2px 6px; border-radius: 4px; font-size: 12px; }
   .login-wrap { display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 24px; }
@@ -178,9 +181,29 @@ function formatBody(s) {
   return escapeHtml(str);
 }
 
+// Render a UTC epoch-ms timestamp in the viewer's local timezone.
 function fmtTs(ms) {
   if (!ms) return "-";
-  return new Date(ms).toISOString().replace("T", " ").replace(/\.\d+Z$/, "Z");
+  const d = new Date(ms);
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ` +
+         `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+
+// Short local-timezone label (e.g. "GMT+8") for column headers / hints.
+function localTzLabel() {
+  const m = new Date().toString().match(/\(([^)]+)\)$/);
+  if (m) return m[1];
+  const off = -new Date().getTimezoneOffset() / 60;
+  return `UTC${off >= 0 ? "+" : ""}${off}`;
+}
+
+// A <input type="datetime-local"> value is wall-clock local time; convert it
+// to a UTC epoch-ms for the API. Returns null for blank/invalid input.
+function localInputToUtcMs(val) {
+  if (!val) return null;
+  const t = new Date(val).getTime();
+  return Number.isNaN(t) ? null : t;
 }
 
 function navHtml(active) {
@@ -296,13 +319,28 @@ async function viewLogs() {
           <option value="gateway_error">gateway_error</option>
           <option value="timeout">timeout</option>
         </select>
+        <label class="range-field">From <input id="ffrom" type="datetime-local" step="1"></label>
+        <label class="range-field">To <input id="fto" type="datetime-local" step="1"></label>
         <button onclick="window.reloadLogs()">Apply</button>
+        <button class="secondary" onclick="window.clearLogFilters()">Clear</button>
+        <span class="muted" style="font-size:12px">times in ${escapeHtml(localTzLabel())}</span>
       </div>
       <div class="panel"><div id="ltbl">Loading…</div></div>
     </main>`;
   await populateKeyFilter();
+  // (Re)bind a single scroll listener for infinite loading; remove any stale
+  // one first so repeated visits to this view don't stack handlers.
+  window.removeEventListener("scroll", onLogsScroll);
+  window.addEventListener("scroll", onLogsScroll, { passive: true });
   await reloadLogs();
 }
+
+window.clearLogFilters = () => {
+  for (const id of ["#fprov", "#fmodel", "#ffrom", "#fto"]) { const el = $(id); if (el) el.value = ""; }
+  $("#fkey").value = "";
+  $("#fstatus").value = "";
+  window.reloadLogs();
+};
 
 async function populateKeyFilter() {
   const sel = $("#fkey");
@@ -319,31 +357,91 @@ async function populateKeyFilter() {
   } catch (_) { /* leave the filter as just "any key" if listing fails */ }
 }
 
+// Paging state for the logs list. `params` holds the active filter set so
+// "load more" pages keep the same filters; `cursor` advances each page.
+const LogsState = { params: null, cursor: null, loading: false, done: false, count: 0 };
+const LOG_PAGE_SIZE = 100;
+
+function logRowHtml(r) {
+  return `<tr class="clickable" onclick="window.openLogTab('${r.id}')">
+    <td class="muted">${fmtTs(r.request_ts)}</td>
+    <td>${escapeHtml(r.namespace||'')}</td>
+    <td>${escapeHtml(r.model||'')}</td>
+    <td class="muted">${escapeHtml(r.endpoint||'')}</td>
+    <td><span class="pill ${r.status==='success'?'ok':'err'}">${escapeHtml(r.status)}</span></td>
+    <td>${r.http_status||''}</td>
+    <td>${r.cached?'✓':''}</td>
+    <td class="muted">${r.duration_ms!=null?r.duration_ms+' ms':''}</td>
+  </tr>`;
+}
+
+// Apply filters: read the toolbar, reset paging, fetch the first page.
 window.reloadLogs = async () => {
   const params = new URLSearchParams();
   const p = $("#fprov").value.trim(); if (p) params.set("namespace", p);
   const m = $("#fmodel").value.trim(); if (m) params.set("model", m);
   const k = $("#fkey").value; if (k) params.set("gateway_key_id", k);
   const s = $("#fstatus").value; if (s) params.set("status", s);
-  params.set("limit", "100");
+  // datetime-local is wall-clock local time → convert to UTC epoch-ms.
+  const from = localInputToUtcMs($("#ffrom").value); if (from != null) params.set("from", String(from));
+  const to = localInputToUtcMs($("#fto").value); if (to != null) params.set("to", String(to));
+
+  LogsState.params = params;
+  LogsState.cursor = null;
+  LogsState.done = false;
+  LogsState.count = 0;
+  LogsState.loading = false;
+  $("#ltbl").innerHTML =
+    `<table><thead><tr><th>Time (${escapeHtml(localTzLabel())})</th><th>Namespace</th><th>Model</th><th>Endpoint</th><th>Status</th><th>HTTP</th><th>Cached</th><th>Latency</th></tr></thead>
+     <tbody id="lrows"></tbody></table>
+     <div id="lfoot" class="logs-foot">Loading…</div>`;
+  await fetchLogsPage();
+};
+
+// Fetch the next page using the active filters + cursor and append the rows.
+async function fetchLogsPage() {
+  if (LogsState.loading || LogsState.done || !LogsState.params) return;
+  const tbody = $("#lrows");
+  if (!tbody) return; // navigated away
+  LogsState.loading = true;
+  const foot = $("#lfoot");
+  if (foot) foot.textContent = LogsState.count ? "Loading more…" : "Loading…";
+
+  const params = new URLSearchParams(LogsState.params);
+  params.set("limit", String(LOG_PAGE_SIZE));
+  if (LogsState.cursor) params.set("cursor", LogsState.cursor);
+
   try {
     const r = await api(`/admin/logs?${params}`);
     const rows = r.items || [];
-    const html = rows.length === 0 ? `<div class="muted">No logs yet.</div>` :
-      `<table><thead><tr><th>Time</th><th>Namespace</th><th>Model</th><th>Endpoint</th><th>Status</th><th>HTTP</th><th>Cached</th><th>Latency</th></tr></thead>
-       <tbody>${rows.map(r=>`<tr class="clickable" onclick="window.openLogTab('${r.id}')">
-         <td class="muted">${fmtTs(r.request_ts)}</td>
-         <td>${escapeHtml(r.namespace||'')}</td>
-         <td>${escapeHtml(r.model||'')}</td>
-         <td class="muted">${escapeHtml(r.endpoint||'')}</td>
-         <td><span class="pill ${r.status==='success'?'ok':'err'}">${escapeHtml(r.status)}</span></td>
-         <td>${r.http_status||''}</td>
-         <td>${r.cached?'✓':''}</td>
-         <td class="muted">${r.duration_ms!=null?r.duration_ms+' ms':''}</td>
-       </tr>`).join("")}</tbody></table>`;
-    $("#ltbl").innerHTML = html;
-  } catch (e) { $("#ltbl").innerHTML = `<div class="status-msg">${escapeHtml(e.message)}</div>`; }
-};
+    if (rows.length) tbody.insertAdjacentHTML("beforeend", rows.map(logRowHtml).join(""));
+    LogsState.count += rows.length;
+    LogsState.cursor = r.next_cursor || null;
+    if (!LogsState.cursor) LogsState.done = true;
+
+    const foot2 = $("#lfoot");
+    if (foot2) {
+      foot2.textContent = LogsState.count === 0 ? "No logs match these filters."
+        : LogsState.done ? `End of logs — ${LogsState.count} shown.` : "Scroll to load more…";
+    }
+    LogsState.loading = false;
+    // If the page didn't fill the viewport, keep pulling so the user can scroll.
+    if (!LogsState.done && document.documentElement.scrollHeight <= window.innerHeight + 100) {
+      await fetchLogsPage();
+    }
+  } catch (e) {
+    LogsState.loading = false;
+    const foot2 = $("#lfoot");
+    if (foot2) foot2.innerHTML = `<span class="status-msg">${escapeHtml(e.message)}</span>`;
+  }
+}
+
+// Window scroll handler: load the next page as the user nears the bottom.
+function onLogsScroll() {
+  if (LogsState.loading || LogsState.done || !$("#lrows")) return;
+  const nearBottom = window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 400;
+  if (nearBottom) fetchLogsPage();
+}
 
 window.openLogTab = (id) => {
   // Same SPA, different hash route — opens cleanly in a new tab.
@@ -377,7 +475,7 @@ function renderLogDetail(d) {
     ? `${escapeHtml(d.fallback_used)} <span class="muted">(via fallback)</span>`
     : escapeHtml(upstreamProvider);
   const left = [
-    ["Time", `<span class="muted">${fmtTs(d.request_ts)}</span>`],
+    [`Time (${localTzLabel()})`, `<span class="muted">${fmtTs(d.request_ts)}</span>`],
     ["Namespace", escapeHtml(d.namespace || "-")],
     ["Provider", providerCell],
     ["Model", escapeHtml(d.model || "-")],

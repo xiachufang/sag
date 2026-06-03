@@ -2,7 +2,6 @@ use chrono::Utc;
 use gateway_storage::models::RequestLogRecord;
 use gateway_storage::traits::LogStore;
 use std::sync::Arc;
-use uuid::Uuid;
 
 /// Helper used by the proxy handler to construct + append a request log
 /// record. Centralized so future milestones can add cost/token fields in
@@ -12,10 +11,17 @@ pub struct LogBuilder {
 }
 
 impl LogBuilder {
-    pub fn new(project_id: String, namespace: Option<String>, endpoint: Option<String>) -> Self {
+    /// `id` is the request id; the caller generates it so the same value can
+    /// also be returned to the client in the `x-gateway-request-id` header.
+    pub fn new(
+        id: String,
+        project_id: String,
+        namespace: Option<String>,
+        endpoint: Option<String>,
+    ) -> Self {
         Self {
             rec: RequestLogRecord {
-                id: Uuid::now_v7().to_string(),
+                id,
                 project_id,
                 gateway_key_id: None,
                 namespace,
@@ -48,6 +54,12 @@ impl LogBuilder {
 
     pub fn id(&self) -> &str {
         &self.rec.id
+    }
+
+    /// Override the request id — used to adopt the provider's response `id`
+    /// for the stored log record once the upstream body has been seen.
+    pub fn set_id(&mut self, id: String) {
+        self.rec.id = id;
     }
 
     pub fn set_model(&mut self, model: Option<String>) {

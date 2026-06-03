@@ -5,7 +5,7 @@ use std::net::SocketAddr;
 use axum::body::Body;
 use axum::extract::{ConnectInfo, Path, State};
 use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode};
-use axum::response::Response;
+use axum::response::{IntoResponse, Response};
 use bytes::{Bytes, BytesMut};
 use futures::stream::{self, StreamExt};
 use http_body_util::BodyExt;
@@ -25,7 +25,7 @@ use crate::error::ApiError;
 use crate::logging::LogBuilder;
 use crate::ratelimit::{check_limits, RatePermit};
 use crate::state::AppState;
-use crate::tokens::extract_token_usage;
+use crate::tokens::{extract_response_id, extract_token_usage};
 
 const MAX_LOG_BODY_BYTES: usize = 64 * 1024;
 const PROXY_BODY_CHANNEL: usize = 32;
@@ -39,6 +39,38 @@ pub async fn proxy_handler(
     headers: HeaderMap,
     method: Method,
     body: Body,
+) -> Response {
+    // Generate the request id once here so every exit path — success, cache
+    // hit, and all error returns — carries the same id in both the stored log
+    // record and the `x-gateway-request-id` response header.
+    let request_id = uuid::Uuid::now_v7().to_string();
+    let mut response = match proxy_inner(
+        state, principal, namespace, tail, remote_addr, headers, method, body, &request_id,
+    )
+    .await
+    {
+        Ok(r) => r,
+        Err(e) => e.into_response(),
+    };
+    if let Ok(hv) = HeaderValue::from_str(&request_id) {
+        response
+            .headers_mut()
+            .insert(HeaderName::from_static("x-gateway-request-id"), hv);
+    }
+    response
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn proxy_inner(
+    state: AppState,
+    principal: GatewayKeyPrincipal,
+    namespace: String,
+    tail: String,
+    remote_addr: SocketAddr,
+    headers: HeaderMap,
+    method: Method,
+    body: Body,
+    request_id: &str,
 ) -> Result<Response, ApiError> {
     let started = Instant::now();
     let config = state.config_snapshot();
@@ -49,6 +81,7 @@ pub async fn proxy_handler(
     let upstream_path = format!("/{}", tail.trim_start_matches('/'));
 
     let mut log = LogBuilder::new(
+        request_id.to_string(),
         principal.project_id.clone(),
         Some(namespace.clone()),
         Some(upstream_path.clone()),
@@ -332,6 +365,9 @@ pub async fn proxy_handler(
                         let _ = tx.send(Err(e)).await;
                     }
                     if let Some(mut log) = log_holder.take() {
+                        if let Some(rid) = extract_response_id(&response_capture) {
+                            log.set_id(rid);
+                        }
                         log.set_status("upstream_error", Some(status.as_u16() as i32));
                         log.set_timing(started.elapsed().as_millis() as i64, upstream_ms, ttfb_ms);
                         let body_text =
@@ -412,6 +448,12 @@ pub async fn proxy_handler(
         }
 
         if let Some(mut log) = log_holder.take() {
+            // Prefer the provider's response id (e.g. `chatcmpl-…`/`msg_…`) as
+            // the stored log id; fall back to the generated request id when the
+            // response carries no `id` (e.g. embeddings).
+            if let Some(rid) = extract_response_id(&response_capture) {
+                log.set_id(rid);
+            }
             let status_class = if status.is_success() {
                 "success"
             } else {
@@ -444,11 +486,8 @@ pub async fn proxy_handler(
         .map_err(|e| ApiError::Gateway(GatewayError::Internal(e.to_string())))?;
 
     insert_cache_headers(response.headers_mut(), cache_status, &cache_key, None);
-    if let Ok(hv) = HeaderValue::from_str(&uuid::Uuid::now_v7().to_string()) {
-        response
-            .headers_mut()
-            .insert(HeaderName::from_static("x-gateway-request-id"), hv);
-    }
+    // The `x-gateway-request-id` header is attached by the `proxy_handler`
+    // wrapper for every response path.
     Ok(response)
 }
 
