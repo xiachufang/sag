@@ -163,7 +163,9 @@ mod tests {
         assert_eq!(extract_response_id(&json).as_deref(), Some("chatcmpl-abc"));
 
         let mut sse = BytesMut::new();
-        sse.extend_from_slice(b"data: {\"id\":\"msg_123\",\"type\":\"message_start\"}\n\ndata: [DONE]\n");
+        sse.extend_from_slice(
+            b"data: {\"id\":\"msg_123\",\"type\":\"message_start\"}\n\ndata: [DONE]\n",
+        );
         assert_eq!(extract_response_id(&sse).as_deref(), Some("msg_123"));
 
         // No id field (e.g. embeddings) → None, caller keeps the generated uuid.

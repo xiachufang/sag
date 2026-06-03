@@ -45,7 +45,15 @@ pub async fn proxy_handler(
     // record and the `x-gateway-request-id` response header.
     let request_id = uuid::Uuid::now_v7().to_string();
     let mut response = match proxy_inner(
-        state, principal, namespace, tail, remote_addr, headers, method, body, &request_id,
+        state,
+        principal,
+        namespace,
+        tail,
+        remote_addr,
+        headers,
+        method,
+        body,
+        &request_id,
     )
     .await
     {
