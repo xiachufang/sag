@@ -56,9 +56,14 @@
   button:disabled { opacity: 0.5; cursor: not-allowed; }
   input, select { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; color: var(--text); font: inherit; }
   input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
-  .toolbar { display: flex; gap: 10px; align-items: center; margin-bottom: 14px; flex-wrap: wrap; }
-  .range-field { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
-  .range-field input[type=datetime-local] { color-scheme: dark; font-size: 12px; padding: 6px 8px; }
+  .toolbar { display: flex; gap: 16px; align-items: flex-end; justify-content: space-between; margin-bottom: 6px; flex-wrap: wrap; }
+  .filters { display: flex; gap: 12px; flex-wrap: wrap; flex: 1 1 auto; }
+  .field { display: flex; flex-direction: column; gap: 5px; }
+  .field > span { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+  .field input, .field select { font-size: 13px; min-width: 150px; }
+  .field input[type=datetime-local] { color-scheme: dark; min-width: 180px; }
+  .filter-actions { display: flex; gap: 8px; align-items: flex-end; }
+  .toolbar-hint { font-size: 12px; margin: 0 0 14px; }
   .logs-foot { padding: 14px 4px 2px; text-align: center; color: var(--muted); font-size: 12px; }
   .muted { color: var(--muted); }
   .code { font-family: ui-monospace, "SF Mono", Menlo, monospace; background: var(--code); padding: 2px 6px; border-radius: 4px; font-size: 12px; }
@@ -309,22 +314,28 @@ async function viewLogs() {
     ${headerHtml("#/logs")}
     <main>
       <div class="toolbar">
-        <input id="fprov" placeholder="namespace (e.g. openai)">
-        <input id="fmodel" placeholder="model">
-        <select id="fkey"><option value="">any key</option></select>
-        <select id="fstatus">
-          <option value="">any status</option>
-          <option value="success">success</option>
-          <option value="upstream_error">upstream_error</option>
-          <option value="gateway_error">gateway_error</option>
-          <option value="timeout">timeout</option>
-        </select>
-        <label class="range-field">From <input id="ffrom" type="datetime-local" step="1"></label>
-        <label class="range-field">To <input id="fto" type="datetime-local" step="1"></label>
-        <button onclick="window.reloadLogs()">Apply</button>
-        <button class="secondary" onclick="window.clearLogFilters()">Clear</button>
-        <span class="muted" style="font-size:12px">times in ${escapeHtml(localTzLabel())}</span>
+        <div class="filters">
+          <label class="field"><span>Namespace</span><input id="fprov" placeholder="e.g. openai"></label>
+          <label class="field"><span>Model</span><input id="fmodel" placeholder="any model"></label>
+          <label class="field"><span>Key</span><select id="fkey"><option value="">any key</option></select></label>
+          <label class="field"><span>Status</span>
+            <select id="fstatus">
+              <option value="">any status</option>
+              <option value="success">success</option>
+              <option value="upstream_error">upstream_error</option>
+              <option value="gateway_error">gateway_error</option>
+              <option value="timeout">timeout</option>
+            </select>
+          </label>
+          <label class="field"><span>From</span><input id="ffrom" type="datetime-local" step="1"></label>
+          <label class="field"><span>To</span><input id="fto" type="datetime-local" step="1"></label>
+        </div>
+        <div class="filter-actions">
+          <button onclick="window.reloadLogs()">Apply</button>
+          <button class="secondary" onclick="window.clearLogFilters()">Clear</button>
+        </div>
       </div>
+      <p class="muted toolbar-hint">Times shown and filtered in ${escapeHtml(localTzLabel())}</p>
       <div class="panel"><div id="ltbl">Loading…</div></div>
     </main>`;
   await populateKeyFilter();
