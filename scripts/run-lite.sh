@@ -10,17 +10,25 @@ set -euo pipefail
 # Always run from the repo root so relative paths in config files resolve.
 cd "$(dirname "$0")/.."
 
-if [[ ! -f .env ]]; then
-  echo "error: .env not found at $(pwd)/.env" >&2
+# Look for .env in the repo root first, then the parent directory.
+ENV_FILE=""
+if [[ -f .env ]]; then
+  ENV_FILE=.env
+elif [[ -f ../.env ]]; then
+  ENV_FILE=../.env
+else
+  echo "error: .env not found at $(pwd)/.env or $(cd .. && pwd)/.env" >&2
   echo "       cp .env.example .env, then fill in GATEWAY_MASTER_KEY etc." >&2
   exit 1
 fi
 
-# Export every variable defined in .env. `set -a` makes plain assignments
-# auto-exported; `set +a` turns it off again so we don't pollute later commands.
+# Export every variable defined in the .env file. `set -a` makes plain
+# assignments auto-exported; `set +a` turns it off again so we don't pollute
+# later commands.
+echo "loading env from $ENV_FILE"
 set -a
 # shellcheck disable=SC1091
-source .env
+source "$ENV_FILE"
 set +a
 
 # If the caller passed args, use them as-is; otherwise default to lite config.

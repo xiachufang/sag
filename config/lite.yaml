@@ -69,10 +69,10 @@ routes:
 
 # Declaratively-managed gateway keys. The Admin API refuses to revoke
 # anything in this list — remove the entry here and reload to drop it.
-# gateway_keys:
-#   - id: prod-svc
-#     name: prod-svc
-#     secret: env://PROD_SVC_GATEWAY_KEY
+gateway_keys:
+  - id: prod-svc
+    name: prod-svc
+    secret: env://GATEWAY_KEY
 #   - id: local-dev
 #     name: local-dev
 #     secret: sk-gw-test-replace-with-real-32-char-secret
