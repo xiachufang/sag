@@ -113,6 +113,17 @@
   .json-num { color: var(--j-num); }
   .json-bool { color: var(--j-bool); font-weight: 500; }
   .json-null { color: var(--j-null); }
+  /* Marker for string values that were parsed and displayed as JSON.
+     Text lives in ::before so it doesn't pollute textContent (Copy button). */
+  .json-strflag { display: inline-block; position: relative; font-size: 10px; font-weight: 600; padding: 0 4px; border: 1px solid var(--j-str); border-radius: 4px; color: var(--j-str); cursor: help; line-height: 1.4; }
+  .json-strflag::before { content: "str"; }
+  .json-strflag.json-nl::before { content: "↵"; }
+  .json-strflag.json-end::before { content: "/str"; }
+  .json-strflag.json-nl.json-end::before { content: "/↵"; }
+  .json-strflag.json-embed::before { content: "json"; }
+  .json-strflag.json-embed.json-end::before { content: "/json"; }
+  /* Instant tooltip explaining the badge (text in ::after stays out of textContent → Copy). */
+  .json-strflag:hover::after { content: attr(data-tip); position: absolute; left: 0; bottom: calc(100% + 6px); z-index: 10; width: max-content; max-width: 320px; padding: 6px 9px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel); color: var(--text); font-size: 11px; font-weight: 400; line-height: 1.4; white-space: normal; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; box-shadow: 0 4px 12px rgba(0,0,0,0.25); pointer-events: none; }
 </style>
 </head>
 <body>
@@ -163,12 +174,130 @@ function highlightJson(jsonText) {
   );
 }
 
-// Returns HTML-safe string ready to inject into a <pre>. Tries JSON; falls
-// back to per-line SSE "data: {json}" formatting; otherwise escaped raw text.
-function formatBody(s) {
+// If `s` looks like a JSON object/array and parses, return the value;
+// otherwise undefined. Scalars ("123", "true") are left alone on purpose.
+function tryParseJson(s) {
+  const t = s.trim();
+  if (t[0] !== "{" && t[0] !== "[") return undefined;
+  try {
+    const v = JSON.parse(t);
+    return v && typeof v === "object" ? v : undefined;
+  } catch { return undefined; }
+}
+
+// Recursive JSON → highlighted HTML pretty-printer. When `expand` is set,
+// string values that themselves contain JSON are parsed and rendered as
+// JSON, prefixed with a "str" badge marking the original type.
+function renderJsonHtml(value, indent, expand) {
+  if (value === null) return `<span class="json-null">null</span>`;
+  if (typeof value === "boolean") return `<span class="json-bool">${value}</span>`;
+  if (typeof value === "number") return `<span class="json-num">${value}</span>`;
+  if (typeof value === "string") {
+    if (expand) {
+      const inner = tryParseJson(value);
+      if (inner !== undefined) {
+        return `<span class="json-strflag" data-tip="Original value is a JSON-encoded string; parsed for display. Toggle Raw to see it verbatim."></span> ` +
+          renderJsonHtml(inner, indent, expand) +
+          ` <span class="json-strflag json-end" data-tip="End of the parsed JSON string value."></span>`;
+      }
+    }
+    return renderStringValue(value, indent, expand);
+  }
+  const pad = "  ".repeat(indent);
+  const padIn = "  ".repeat(indent + 1);
+  if (Array.isArray(value)) {
+    if (!value.length) return "[]";
+    return `[\n${value.map(v => padIn + renderJsonHtml(v, indent + 1, expand)).join(",\n")}\n${pad}]`;
+  }
+  const keys = Object.keys(value);
+  if (!keys.length) return "{}";
+  const items = keys.map(k =>
+    `${padIn}<span class="json-key">${escapeHtml(JSON.stringify(k))}:</span> ${renderJsonHtml(value[k], indent + 1, expand)}`);
+  return `{\n${items.join(",\n")}\n${pad}}`;
+}
+
+// From an opening "{" / "[" at `start`, find the index of its balanced
+// closer, skipping over quoted strings. Returns -1 if unbalanced/mismatched.
+function scanBalanced(s, start) {
+  const close = s[start] === "{" ? "}" : "]";
+  let depth = 0, inStr = false, esc = false;
+  for (let i = start; i < s.length; i++) {
+    const c = s[i];
+    if (inStr) {
+      if (esc) esc = false;
+      else if (c === "\\") esc = true;
+      else if (c === '"') inStr = false;
+    } else if (c === '"') inStr = true;
+    else if (c === "{" || c === "[") depth++;
+    else if (c === "}" || c === "]") {
+      depth--;
+      if (depth === 0) return c === close ? i : -1;
+    }
+  }
+  return -1;
+}
+
+// Find JSON object/array fragments embedded in free text (e.g. a prompt that
+// quotes an expected response shape). Only balanced spans that strictly
+// JSON.parse — and contain a quoted string, to skip trivia like "[0]" — count.
+function findEmbeddedJson(s) {
+  const out = [];
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (c !== "{" && c !== "[") continue;
+    const end = scanBalanced(s, i);
+    if (end < 0) continue;
+    const frag = s.slice(i, end + 1);
+    if (!frag.includes('"')) continue;
+    let v;
+    try { v = JSON.parse(frag); } catch { continue; }
+    if (!v || typeof v !== "object") continue;
+    out.push({ start: i, end: end + 1, value: v });
+    i = end;
+  }
+  return out;
+}
+
+// Render a string value: real line breaks for "\n" (continuation lines
+// indented one level deeper), and — when `expand` is set — JSON fragments
+// embedded in the text formatted in place. Falls back to a plain quoted
+// string when neither applies.
+function renderStringValue(value, indent, expand) {
+  const cont = "\n" + "  ".repeat(indent + 1);
+  // JSON-escape a text segment but turn "\n" escapes back into real lines.
+  const textSeg = (s) => s.split(/\r?\n/).map(l => escapeHtml(JSON.stringify(l).slice(1, -1))).join(cont);
+  const fragments = expand ? findEmbeddedJson(value) : [];
+  const multiline = /\r?\n/.test(value);
+  if (!fragments.length && !multiline) {
+    return `<span class="json-str">${escapeHtml(JSON.stringify(value))}</span>`;
+  }
+  let html = "", last = 0;
+  for (const f of fragments) {
+    if (f.start > last) html += `<span class="json-str">${textSeg(value.slice(last, f.start))}</span>`;
+    html += `<span class="json-strflag json-embed" data-tip="JSON fragment embedded in string text; formatted for display. Toggle Raw to see it verbatim."></span> ` +
+      renderJsonHtml(f.value, indent + 1, expand) +
+      ` <span class="json-strflag json-embed json-end" data-tip="End of the embedded JSON fragment."></span>`;
+    last = f.end;
+  }
+  if (last < value.length) html += `<span class="json-str">${textSeg(value.slice(last))}</span>`;
+  const open = multiline
+    ? `<span class="json-strflag json-nl" data-tip="String value contains line breaks; rendered as real lines. Toggle Raw to see the \\n escapes."></span> `
+    : "";
+  const closeB = multiline
+    ? ` <span class="json-strflag json-nl json-end" data-tip="End of the multiline string value."></span>`
+    : "";
+  return `${open}<span class="json-str">"</span>${html}<span class="json-str">"</span>${closeB}`;
+}
+
+// Returns HTML-safe string ready to inject into a <pre>. With `raw` the body
+// is shown verbatim (escaped only). Otherwise tries JSON (expanding nested
+// JSON-in-string values); falls back to per-line SSE "data: {json}"
+// formatting; otherwise escaped raw text.
+function formatBody(s, raw = false) {
   if (s == null || s === "") return "-";
+  if (raw) return escapeHtml(String(s));
   const str = String(s).trim();
-  try { return highlightJson(JSON.stringify(JSON.parse(str), null, 2)); } catch {}
+  try { return renderJsonHtml(JSON.parse(str), 0, true); } catch {}
   if (str.includes("data:")) {
     const lines = str.split(/\r?\n/);
     let touched = false;
@@ -176,9 +305,9 @@ function formatBody(s) {
       const m = line.match(/^(data:\s*)(.+)$/);
       if (!m) return escapeHtml(line);
       try {
-        const pretty = JSON.stringify(JSON.parse(m[2]), null, 2);
+        const html = renderJsonHtml(JSON.parse(m[2]), 0, true);
         touched = true;
-        return escapeHtml(m[1]) + highlightJson(pretty);
+        return escapeHtml(m[1]) + html;
       } catch { return escapeHtml(line); }
     });
     if (touched) return out.join("\n");
@@ -509,6 +638,10 @@ function renderLogDetail(d) {
   const dl = (rows) => `<dl>${rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("")}</dl>`;
   const copyBtn = (target) => `<button type="button" class="ghost-btn" onclick="window.copyPane('${target}', this)">Copy</button>`;
   const wrapToggle = (key) => `<label><input type="checkbox" onchange="window.toggleWrap('${key}', this.checked)"> Wrap lines</label>`;
+  const rawToggle = (key) => `<label title="Show the body exactly as logged"><input type="checkbox" onchange="window.toggleRaw('${key}', this.checked)"> Raw</label>`;
+  // Keep originals so the Raw toggle can re-render without refetching.
+  DetailBodies.req = d.request_body;
+  DetailBodies.res = d.response_body;
   $("#logDetail").innerHTML = `
     <div class="detail-head">
       <a class="back" href="#/logs">← Back to logs</a>
@@ -528,11 +661,11 @@ function renderLogDetail(d) {
         <pre class="detail-pre" id="bodyMeta">${meta ? highlightJson(meta) : "-"}</pre>
       </div>
       <div class="tab-pane active" data-pane="req">
-        <div class="pane-actions">${copyBtn('bodyReq')}${wrapToggle('req')}</div>
+        <div class="pane-actions">${copyBtn('bodyReq')}${rawToggle('req')}${wrapToggle('req')}</div>
         <pre class="detail-pre" id="bodyReq">${formatBody(d.request_body)}</pre>
       </div>
       <div class="tab-pane" data-pane="res">
-        <div class="pane-actions">${copyBtn('bodyRes')}${wrapToggle('res')}</div>
+        <div class="pane-actions">${copyBtn('bodyRes')}${rawToggle('res')}${wrapToggle('res')}</div>
         <pre class="detail-pre" id="bodyRes">${formatBody(d.response_body)}</pre>
       </div>
       ${d.error_message ? `<div class="tab-pane" data-pane="err">
@@ -541,6 +674,17 @@ function renderLogDetail(d) {
       </div>` : ""}
     </div>`;
 }
+
+// Original request/response bodies of the log currently shown in the detail
+// view, kept so the Raw toggle can re-render without refetching.
+const DetailBodies = { req: null, res: null };
+
+window.toggleRaw = (key, on) => {
+  const id = key === "req" ? "bodyReq" : key === "res" ? "bodyRes" : null;
+  if (!id) return;
+  const el = document.getElementById(id);
+  if (el) el.innerHTML = formatBody(DetailBodies[key], on);
+};
 
 window.switchBodyTab = (key) => {
   document.querySelectorAll(".tab").forEach(b => b.classList.toggle("active", b.dataset.tab === key));
@@ -588,11 +732,20 @@ window.copyCurl = async (btn) => {
 };
 
 window.copyPane = async (elementId, btn) => {
-  const el = document.getElementById(elementId);
-  if (!el) return;
+  // Request/response bodies always copy the raw logged content, not the
+  // pretty-printed view (which expands nested JSON and isn't valid JSON).
+  const rawKey = elementId === "bodyReq" ? "req" : elementId === "bodyRes" ? "res" : null;
+  let text;
+  if (rawKey && DetailBodies[rawKey] != null) {
+    text = String(DetailBodies[rawKey]);
+  } else {
+    const el = document.getElementById(elementId);
+    if (!el) return;
+    text = el.textContent;
+  }
   const original = btn.textContent;
   try {
-    await navigator.clipboard.writeText(el.textContent);
+    await navigator.clipboard.writeText(text);
     btn.textContent = "Copied";
   } catch {
     btn.textContent = "Failed";
