@@ -43,6 +43,24 @@ impl PricingCatalog {
         Self::from_str(&text)
     }
 
+    /// Return a copy of this catalog with `overrides` layered on top —
+    /// an override for the same (provider, model) replaces the file entry,
+    /// and overrides for unknown models are added.
+    pub fn with_overrides<I>(&self, overrides: I) -> Self
+    where
+        I: IntoIterator<Item = PricingEntry>,
+    {
+        let mut by_key = self.by_key.clone();
+        for e in overrides {
+            by_key.insert((e.provider.clone(), e.model.clone()), e);
+        }
+        Self { by_key }
+    }
+
+    pub fn entries(&self) -> impl Iterator<Item = &PricingEntry> {
+        self.by_key.values()
+    }
+
     pub fn lookup(&self, provider: &str, model: &str) -> Option<&PricingEntry> {
         self.by_key
             .get(&(provider.to_string(), model.to_string()))

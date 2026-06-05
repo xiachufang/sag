@@ -60,7 +60,7 @@ impl LogStore for PostgresLogStore {
             r#"
             SELECT id, project_id, gateway_key_id, namespace, model, endpoint,
                    request_ts, duration_ms, status, http_status, cached, retry_count,
-                   prompt_tokens, completion_tokens, cost_usd
+                   prompt_tokens, completion_tokens, cost_usd, request_body
               FROM request_logs WHERE 1=1
             "#,
         );
@@ -109,6 +109,7 @@ impl LogStore for PostgresLogStore {
                 prompt_tokens: r.get("prompt_tokens"),
                 completion_tokens: r.get("completion_tokens"),
                 cost_usd: r.get("cost_usd"),
+                request_body: r.get("request_body"),
             })
             .collect();
         let next_cursor = if has_more {
@@ -288,6 +289,89 @@ impl LogStore for PostgresLogStore {
             .bind(ts)
             .execute(&self.pool)
             .await?;
+        Ok(res.rows_affected())
+    }
+
+    async fn distinct_cost_keys(
+        &self,
+        from: Option<Timestamp>,
+        to: Option<Timestamp>,
+    ) -> Result<Vec<(String, String)>> {
+        // Provider resolution mirrors request-time pricing: the fallback
+        // provider if one fired, else the provider of the last attempt in the
+        // metadata trace (the real upstream — namespaces can be decoupled from
+        // providers), else the namespace.
+        let rows = sqlx::query(
+            r#"
+            SELECT DISTINCT
+                   COALESCE(fallback_used,
+                            metadata::jsonb -> 'attempts' -> -1 ->> 'provider',
+                            namespace) AS provider,
+                   model
+              FROM request_logs
+             WHERE model IS NOT NULL
+               AND COALESCE(fallback_used,
+                            metadata::jsonb -> 'attempts' -> -1 ->> 'provider',
+                            namespace) IS NOT NULL
+               AND (prompt_tokens IS NOT NULL OR completion_tokens IS NOT NULL)
+               AND ($1::bigint IS NULL OR request_ts >= $1)
+               AND ($2::bigint IS NULL OR request_ts <= $2)
+            "#,
+        )
+        .bind(from)
+        .bind(to)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(|r| (r.get("provider"), r.get("model")))
+            .collect())
+    }
+
+    async fn recompute_costs(
+        &self,
+        provider: &str,
+        model: &str,
+        input_per_1k: f64,
+        cached_input_per_1k: f64,
+        output_per_1k: f64,
+        from: Option<Timestamp>,
+        to: Option<Timestamp>,
+    ) -> Result<u64> {
+        // Mirrors gateway-core's calculator: (prompt - cached) at the input
+        // rate, cached at the cached rate, completion at the output rate,
+        // rounded to 6 decimals. Cached responses keep cost_usd = 0.
+        let res = sqlx::query(
+            r#"
+            UPDATE request_logs SET
+                would_have_cost_usd = ROUND(((
+                    GREATEST(COALESCE(prompt_tokens, 0) - COALESCE(cached_tokens, 0), 0) * $1
+                    + COALESCE(cached_tokens, 0) * $2
+                    + COALESCE(completion_tokens, 0) * $3
+                ) / 1000.0)::numeric, 6)::double precision,
+                cost_usd = CASE WHEN cached THEN 0.0 ELSE ROUND(((
+                    GREATEST(COALESCE(prompt_tokens, 0) - COALESCE(cached_tokens, 0), 0) * $1
+                    + COALESCE(cached_tokens, 0) * $2
+                    + COALESCE(completion_tokens, 0) * $3
+                ) / 1000.0)::numeric, 6)::double precision END
+             WHERE COALESCE(fallback_used,
+                            metadata::jsonb -> 'attempts' -> -1 ->> 'provider',
+                            namespace) = $4
+               AND model = $5
+               AND (prompt_tokens IS NOT NULL OR completion_tokens IS NOT NULL)
+               AND ($6::bigint IS NULL OR request_ts >= $6)
+               AND ($7::bigint IS NULL OR request_ts <= $7)
+            "#,
+        )
+        .bind(input_per_1k)
+        .bind(cached_input_per_1k)
+        .bind(output_per_1k)
+        .bind(provider)
+        .bind(model)
+        .bind(from)
+        .bind(to)
+        .execute(&self.pool)
+        .await?;
         Ok(res.rows_affected())
     }
 

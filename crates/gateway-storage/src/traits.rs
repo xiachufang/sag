@@ -33,6 +33,11 @@ pub trait MetadataStore: Send + Sync {
     async fn list_budgets(&self) -> Result<Vec<Budget>>;
     async fn get_budget(&self, id: &str) -> Result<Option<Budget>>;
 
+    /// Admin-set model price overrides (take precedence over the catalog file).
+    async fn upsert_pricing(&self, p: PricingRow) -> Result<()>;
+    async fn list_pricing(&self) -> Result<Vec<PricingRow>>;
+    async fn delete_pricing(&self, provider: &str, model: &str) -> Result<()>;
+
     async fn create_admin_user(&self, u: NewAdminUser) -> Result<AdminUser>;
     async fn find_admin_user(&self, username: &str) -> Result<Option<AdminUser>>;
     async fn list_admin_users(&self) -> Result<Vec<AdminUser>>;
@@ -48,6 +53,31 @@ pub trait LogStore: Send + Sync {
     async fn get_by_id(&self, id: &str) -> Result<Option<RequestLogDetail>>;
     async fn aggregate(&self, q: AggregateQuery) -> Result<AggregateResult>;
     async fn purge_older_than(&self, ts: Timestamp) -> Result<u64>;
+
+    /// Distinct (provider, model) pairs among logs that carry token counts,
+    /// where provider is `COALESCE(fallback_used, namespace)` — the same
+    /// resolution used when the cost was originally computed. Supports the
+    /// admin cost-recompute flow.
+    async fn distinct_cost_keys(
+        &self,
+        from: Option<Timestamp>,
+        to: Option<Timestamp>,
+    ) -> Result<Vec<(String, String)>>;
+
+    /// Re-derive `cost_usd` / `would_have_cost_usd` from stored token counts
+    /// for all rows matching (provider, model) using the given per-1K rates.
+    /// Cached rows keep `cost_usd = 0`. Returns the number of rows updated.
+    #[allow(clippy::too_many_arguments)]
+    async fn recompute_costs(
+        &self,
+        provider: &str,
+        model: &str,
+        input_per_1k: f64,
+        cached_input_per_1k: f64,
+        output_per_1k: f64,
+        from: Option<Timestamp>,
+        to: Option<Timestamp>,
+    ) -> Result<u64>;
 
     /// Flush any buffered records. Called on shutdown.
     async fn flush(&self) -> Result<()>;

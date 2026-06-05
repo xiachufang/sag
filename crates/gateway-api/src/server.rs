@@ -10,7 +10,7 @@ use tokio::sync::oneshot;
 use tower_http::trace::TraceLayer;
 
 use crate::routes::{
-    admin::{auth as admin_auth, budgets, cost, keys, logs, routes_cfg},
+    admin::{auth as admin_auth, budgets, cost, keys, logs, pricing, routes_cfg},
     health, metrics, proxy,
 };
 use crate::state::AppState;
@@ -33,6 +33,12 @@ pub fn build_router(state: AppState) -> Router {
         .route("/logs/:id", get(logs::get_log))
         .route("/routes", get(routes_cfg::get_routes))
         .route("/cost", get(cost::aggregate_cost))
+        .route(
+            "/pricing",
+            get(pricing::list_pricing).put(pricing::upsert_pricing),
+        )
+        .route("/pricing/recompute", post(pricing::recompute_costs))
+        .route("/pricing/:provider/:model", delete(pricing::delete_pricing))
         .route("/budgets", get(budgets::list_budgets));
 
     Router::new()

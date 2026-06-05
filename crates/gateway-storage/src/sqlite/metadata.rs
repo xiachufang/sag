@@ -347,6 +347,59 @@ impl MetadataStore for SqliteMetadataStore {
         row.map(row_to_budget).transpose()
     }
 
+    // Overrides live in the `pricing` table with effective_from pinned to 0
+    // so the (provider, model, effective_from) PK degenerates to one row per
+    // (provider, model).
+    async fn upsert_pricing(&self, p: PricingRow) -> Result<()> {
+        let _w = self.write_lock.lock().await;
+        sqlx::query(
+            r#"
+            INSERT INTO pricing (provider, model, input_per_1k, output_per_1k, cached_input_per_1k, effective_from)
+            VALUES (?, ?, ?, ?, ?, 0)
+            ON CONFLICT(provider, model, effective_from) DO UPDATE SET
+                input_per_1k = excluded.input_per_1k,
+                output_per_1k = excluded.output_per_1k,
+                cached_input_per_1k = excluded.cached_input_per_1k
+            "#,
+        )
+        .bind(&p.provider)
+        .bind(&p.model)
+        .bind(p.input_per_1k)
+        .bind(p.output_per_1k)
+        .bind(p.cached_input_per_1k)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn list_pricing(&self) -> Result<Vec<PricingRow>> {
+        let rows = sqlx::query(
+            "SELECT provider, model, input_per_1k, output_per_1k, cached_input_per_1k FROM pricing",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(|r| PricingRow {
+                provider: r.get("provider"),
+                model: r.get("model"),
+                input_per_1k: r.get("input_per_1k"),
+                output_per_1k: r.get("output_per_1k"),
+                cached_input_per_1k: r.get("cached_input_per_1k"),
+            })
+            .collect())
+    }
+
+    async fn delete_pricing(&self, provider: &str, model: &str) -> Result<()> {
+        let _w = self.write_lock.lock().await;
+        sqlx::query("DELETE FROM pricing WHERE provider = ? AND model = ?")
+            .bind(provider)
+            .bind(model)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
     async fn create_admin_user(&self, u: NewAdminUser) -> Result<AdminUser> {
         let created_at = now_ms();
         let _w = self.write_lock.lock().await;

@@ -3,4 +3,5 @@ pub mod budgets;
 pub mod cost;
 pub mod keys;
 pub mod logs;
+pub mod pricing;
 pub mod routes_cfg;

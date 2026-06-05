@@ -225,7 +225,7 @@ async fn proxy_inner(
         let mut would_have = None;
         if let Some(model) = log.model().map(str::to_string) {
             if let Some(bd) = gateway_core::pricing::compute_cost(
-                &state.pricing,
+                &state.pricing.load(),
                 upstream_for_pricing,
                 &model,
                 gateway_core::pricing::TokenUsage {
@@ -438,7 +438,7 @@ async fn proxy_inner(
                     cached: usage.cached.unwrap_or(0),
                 };
                 if let Some(bd) = gateway_core::pricing::compute_cost(
-                    &pricing,
+                    &pricing.load(),
                     &upstream_provider,
                     &model,
                     pricing_usage,

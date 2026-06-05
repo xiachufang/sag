@@ -336,6 +336,57 @@ impl MetadataStore for PostgresMetadataStore {
         row.map(row_to_budget).transpose()
     }
 
+    // Overrides live in the `pricing` table with effective_from pinned to 0
+    // so the (provider, model, effective_from) PK degenerates to one row per
+    // (provider, model).
+    async fn upsert_pricing(&self, p: PricingRow) -> Result<()> {
+        sqlx::query(
+            r#"
+            INSERT INTO pricing (provider, model, input_per_1k, output_per_1k, cached_input_per_1k, effective_from)
+            VALUES ($1, $2, $3, $4, $5, 0)
+            ON CONFLICT(provider, model, effective_from) DO UPDATE SET
+                input_per_1k = EXCLUDED.input_per_1k,
+                output_per_1k = EXCLUDED.output_per_1k,
+                cached_input_per_1k = EXCLUDED.cached_input_per_1k
+            "#,
+        )
+        .bind(&p.provider)
+        .bind(&p.model)
+        .bind(p.input_per_1k)
+        .bind(p.output_per_1k)
+        .bind(p.cached_input_per_1k)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn list_pricing(&self) -> Result<Vec<PricingRow>> {
+        let rows = sqlx::query(
+            "SELECT provider, model, input_per_1k, output_per_1k, cached_input_per_1k FROM pricing",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(|r| PricingRow {
+                provider: r.get("provider"),
+                model: r.get("model"),
+                input_per_1k: r.get("input_per_1k"),
+                output_per_1k: r.get("output_per_1k"),
+                cached_input_per_1k: r.get("cached_input_per_1k"),
+            })
+            .collect())
+    }
+
+    async fn delete_pricing(&self, provider: &str, model: &str) -> Result<()> {
+        sqlx::query("DELETE FROM pricing WHERE provider = $1 AND model = $2")
+            .bind(provider)
+            .bind(model)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
     async fn create_admin_user(&self, u: NewAdminUser) -> Result<AdminUser> {
         let created_at = now_ms();
         sqlx::query(

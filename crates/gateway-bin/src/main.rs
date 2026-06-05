@@ -79,7 +79,7 @@ async fn main() -> Result<()> {
     let proxy = Arc::new(ProxyEngine::new(&config).context("failed to construct proxy engine")?);
 
     let config_arc = Arc::new(ArcSwap::from_pointee(config.clone()));
-    let pricing = Arc::new(
+    let pricing_base = Arc::new(
         PricingCatalog::from_path(&cli.pricing_catalog).with_context(|| {
             format!(
                 "failed to load pricing catalog {}",
@@ -87,6 +87,16 @@ async fn main() -> Result<()> {
             )
         })?,
     );
+    // Layer admin-set overrides (persisted via /admin/pricing) on top of the
+    // file catalog so they survive restarts.
+    let pricing_overrides = stores
+        .metadata
+        .list_pricing()
+        .await
+        .context("failed to load pricing overrides")?;
+    let pricing = Arc::new(ArcSwap::from_pointee(
+        gateway_api::routes::admin::pricing::merged_catalog(&pricing_base, pricing_overrides),
+    ));
     let budgets = Arc::new(BudgetManager::new(
         stores.counter.clone(),
         stores.metadata.clone(),
@@ -102,6 +112,7 @@ async fn main() -> Result<()> {
         master_key: Arc::new(master_key),
         admin_signer: Arc::new(admin_signer),
         pricing,
+        pricing_base,
         budgets,
     };
 

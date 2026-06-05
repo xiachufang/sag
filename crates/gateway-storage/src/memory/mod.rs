@@ -23,6 +23,7 @@ struct MemMeta {
     routes: HashMap<String, (RoutesConfig, i64)>,
     budgets: HashMap<String, Budget>,
     admins: HashMap<String, AdminUser>,
+    pricing: HashMap<(String, String), PricingRow>,
 }
 
 impl Default for MemoryMetadataStore {
@@ -212,6 +213,35 @@ impl MetadataStore for MemoryMetadataStore {
         Ok(())
     }
 
+    async fn upsert_pricing(&self, p: PricingRow) -> Result<()> {
+        self.state
+            .lock()
+            .unwrap()
+            .pricing
+            .insert((p.provider.clone(), p.model.clone()), p);
+        Ok(())
+    }
+
+    async fn list_pricing(&self) -> Result<Vec<PricingRow>> {
+        Ok(self
+            .state
+            .lock()
+            .unwrap()
+            .pricing
+            .values()
+            .cloned()
+            .collect())
+    }
+
+    async fn delete_pricing(&self, provider: &str, model: &str) -> Result<()> {
+        self.state
+            .lock()
+            .unwrap()
+            .pricing
+            .remove(&(provider.to_string(), model.to_string()));
+        Ok(())
+    }
+
     async fn list_budgets(&self) -> Result<Vec<Budget>> {
         Ok(self
             .state
@@ -282,6 +312,26 @@ pub struct MemoryLogStore {
     capacity: usize,
 }
 
+/// Provider used for pricing, mirroring the request-time resolution: the
+/// fallback provider if one fired, else the provider of the last attempt in
+/// the metadata trace (the real upstream — namespaces can be decoupled from
+/// providers), else the namespace.
+fn resolve_provider(r: &RequestLogRecord) -> Option<String> {
+    r.fallback_used
+        .clone()
+        .or_else(|| {
+            r.metadata
+                .as_ref()
+                .and_then(|m| m.get("attempts"))
+                .and_then(|a| a.as_array())
+                .and_then(|a| a.last())
+                .and_then(|x| x.get("provider"))
+                .and_then(|p| p.as_str())
+                .map(str::to_string)
+        })
+        .or_else(|| r.namespace.clone())
+}
+
 impl MemoryLogStore {
     pub fn new(capacity: usize) -> Self {
         Self {
@@ -335,6 +385,7 @@ impl LogStore for MemoryLogStore {
                 prompt_tokens: r.prompt_tokens,
                 completion_tokens: r.completion_tokens,
                 cost_usd: r.cost_usd,
+                request_body: r.request_body.clone(),
             })
             .collect();
         rows.sort_by(|a, b| b.request_ts.cmp(&a.request_ts));
@@ -395,6 +446,64 @@ impl LogStore for MemoryLogStore {
         let before = g.len();
         g.retain(|r| r.request_ts >= ts);
         Ok((before - g.len()) as u64)
+    }
+
+    async fn distinct_cost_keys(
+        &self,
+        from: Option<Timestamp>,
+        to: Option<Timestamp>,
+    ) -> Result<Vec<(String, String)>> {
+        let g = self.state.lock().unwrap();
+        let mut keys: Vec<(String, String)> = g
+            .iter()
+            .filter(|r| {
+                (r.prompt_tokens.is_some() || r.completion_tokens.is_some())
+                    && from.is_none_or(|f| r.request_ts >= f)
+                    && to.is_none_or(|t| r.request_ts <= t)
+            })
+            .filter_map(|r| Some((resolve_provider(r)?, r.model.clone()?)))
+            .collect();
+        keys.sort();
+        keys.dedup();
+        Ok(keys)
+    }
+
+    async fn recompute_costs(
+        &self,
+        provider: &str,
+        model: &str,
+        input_per_1k: f64,
+        cached_input_per_1k: f64,
+        output_per_1k: f64,
+        from: Option<Timestamp>,
+        to: Option<Timestamp>,
+    ) -> Result<u64> {
+        let round6 = |v: f64| (v * 1_000_000.0).round() / 1_000_000.0;
+        let mut g = self.state.lock().unwrap();
+        let mut updated = 0u64;
+        for r in g.iter_mut() {
+            let r_provider = resolve_provider(r);
+            if r_provider.as_deref() != Some(provider)
+                || r.model.as_deref() != Some(model)
+                || (r.prompt_tokens.is_none() && r.completion_tokens.is_none())
+                || from.is_some_and(|f| r.request_ts < f)
+                || to.is_some_and(|t| r.request_ts > t)
+            {
+                continue;
+            }
+            let prompt = r.prompt_tokens.unwrap_or(0);
+            let cached = r.cached_tokens.unwrap_or(0);
+            let completion = r.completion_tokens.unwrap_or(0);
+            let cost = round6(
+                (prompt - cached).max(0) as f64 * input_per_1k / 1000.0
+                    + cached.max(0) as f64 * cached_input_per_1k / 1000.0
+                    + completion.max(0) as f64 * output_per_1k / 1000.0,
+            );
+            r.would_have_cost_usd = Some(cost);
+            r.cost_usd = Some(if r.cached { 0.0 } else { cost });
+            updated += 1;
+        }
+        Ok(updated)
     }
 
     async fn flush(&self) -> Result<()> {

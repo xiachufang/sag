@@ -112,6 +112,10 @@ pub struct RequestLogRow {
     pub prompt_tokens: Option<i64>,
     pub completion_tokens: Option<i64>,
     pub cost_usd: Option<f64>,
+    /// Raw (clipped) request body, carried so the API layer can derive a
+    /// short preview for list views. Never serialized into API responses.
+    #[serde(skip_serializing, default)]
+    pub request_body: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -177,6 +181,17 @@ pub struct AggregateGroup {
     pub completion_tokens: i64,
     pub cost_usd: f64,
     pub cached_savings_usd: f64,
+}
+
+/// Admin-set model price stored in the `pricing` table. Overrides the
+/// entry shipped in the pricing catalog file for the same (provider, model).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PricingRow {
+    pub provider: String,
+    pub model: String,
+    pub input_per_1k: f64,
+    pub output_per_1k: f64,
+    pub cached_input_per_1k: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

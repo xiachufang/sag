@@ -55,6 +55,10 @@
   button.danger { background: var(--danger); }
   button:disabled { opacity: 0.5; cursor: not-allowed; }
   input, select { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; color: var(--text); font: inherit; }
+  /* Uniform control height: native selects ignore vertical padding on some
+     platforms and end up shorter than text inputs. */
+  input:where(:not([type=checkbox]):not([type=radio])), select { height: 36px; padding-top: 0; padding-bottom: 0; }
+  select { appearance: none; -webkit-appearance: none; padding-right: 28px; background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="10" height="6" viewBox="0 0 10 6"><path d="M1 1l4 4 4-4" fill="none" stroke="%23888d98" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>'); background-repeat: no-repeat; background-position: right 10px center; }
   input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
   .toolbar { display: flex; gap: 16px; align-items: flex-end; justify-content: space-between; margin-bottom: 6px; flex-wrap: wrap; }
   .filters { display: flex; gap: 12px; flex-wrap: wrap; flex: 1 1 auto; }
@@ -63,8 +67,10 @@
   .field input, .field select { font-size: 13px; min-width: 150px; }
   .field input[type=datetime-local] { color-scheme: dark; min-width: 180px; }
   .filter-actions { display: flex; gap: 8px; align-items: flex-end; }
+  .filter-actions button { height: 36px; padding-top: 0; padding-bottom: 0; }
   .toolbar-hint { font-size: 12px; margin: 0 0 14px; }
   .logs-foot { padding: 14px 4px 2px; text-align: center; color: var(--muted); font-size: 12px; }
+  td.preview { max-width: 340px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 12px; }
   .muted { color: var(--muted); }
   .code { font-family: ui-monospace, "SF Mono", Menlo, monospace; background: var(--code); padding: 2px 6px; border-radius: 4px; font-size: 12px; }
   .login-wrap { display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 24px; }
@@ -95,8 +101,12 @@
   .summary-cols dd { margin: 0; word-break: break-word; }
   /* Tabs */
   .tabs { display: flex; gap: 0; border-bottom: 1px solid var(--border); margin: 0 0 12px; }
-  .tab { padding: 8px 14px; cursor: pointer; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600; background: none; border: 0; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+  /* border-radius: 0 — tabs are <button>s, and the global button radius makes
+     the 2px active underline curl around the corners. */
+  .tab { padding: 8px 14px; cursor: pointer; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600; background: none; border: 0; border-bottom: 2px solid transparent; border-radius: 0; margin-bottom: -1px; }
   .tab.active { color: var(--text); border-bottom-color: var(--accent); }
+  .tab:focus { outline: none; }
+  .tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
   .tab-pane { display: none; }
   .tab-pane.active { display: block; }
   .pane-actions { display: flex; justify-content: flex-end; gap: 10px; align-items: center; margin-bottom: 6px; }
@@ -503,13 +513,13 @@ const LogsState = { params: null, cursor: null, loading: false, done: false, cou
 const LOG_PAGE_SIZE = 100;
 
 function logRowHtml(r) {
+  const preview = r.request_preview || '';
   return `<tr class="clickable" onclick="window.openLogTab('${r.id}')">
     <td class="muted">${fmtTs(r.request_ts)}</td>
     <td>${escapeHtml(r.namespace||'')}</td>
     <td>${escapeHtml(r.model||'')}</td>
-    <td class="muted">${escapeHtml(r.endpoint||'')}</td>
+    <td class="muted preview" title="${escapeHtml(preview)}">${escapeHtml(preview)}</td>
     <td><span class="pill ${r.status==='success'?'ok':'err'}">${escapeHtml(r.status)}</span></td>
-    <td>${r.http_status||''}</td>
     <td>${r.cached?'✓':''}</td>
     <td class="muted">${r.duration_ms!=null?r.duration_ms+' ms':''}</td>
   </tr>`;
@@ -532,7 +542,7 @@ window.reloadLogs = async () => {
   LogsState.count = 0;
   LogsState.loading = false;
   $("#ltbl").innerHTML =
-    `<table><thead><tr><th>Time (${escapeHtml(localTzLabel())})</th><th>Namespace</th><th>Model</th><th>Endpoint</th><th>Status</th><th>HTTP</th><th>Cached</th><th>Latency</th></tr></thead>
+    `<table><thead><tr><th>Time (${escapeHtml(localTzLabel())})</th><th>Namespace</th><th>Model</th><th>Request</th><th>Status</th><th>Cached</th><th>Latency</th></tr></thead>
      <tbody id="lrows"></tbody></table>
      <div id="lfoot" class="logs-foot">Loading…</div>`;
   await fetchLogsPage();
@@ -765,6 +775,40 @@ async function viewCost() {
           <option value="gateway_key">by key</option>
         </select>
         <button onclick="window.reloadCost()">Apply</button>
+        <button class="secondary" id="pricingToggle" style="margin-left:auto" onclick="window.togglePricing()">Model Pricing</button>
+      </div>
+      <div class="panel" id="pricingPanel" style="margin-bottom:16px;display:none">
+        <h3 style="margin:0 0 4px;font-size:14px">Model Pricing</h3>
+        <p class="muted" style="margin:0 0 12px;font-size:12px">USD per 1K tokens. Prices saved here override the pricing catalog file and apply immediately.</p>
+        <div class="toolbar" style="margin-bottom:4px">
+          <div class="filters">
+            <label class="field"><span>Provider</span><input id="pprov" placeholder="openai"></label>
+            <label class="field"><span>Model</span><input id="pmodel" placeholder="gpt-4o"></label>
+            <label class="field"><span>Input /1K</span><input id="pin" type="number" step="any" min="0" placeholder="0.005"></label>
+            <label class="field"><span>Output /1K</span><input id="pout" type="number" step="any" min="0" placeholder="0.015"></label>
+            <label class="field"><span>Cached /1K</span><input id="pcache" type="number" step="any" min="0" placeholder="optional"></label>
+          </div>
+          <div class="filter-actions">
+            <button onclick="window.savePricing()">Save</button>
+            <button class="secondary" onclick="window.clearPricingForm()">Reset</button>
+            <button class="secondary" id="recomputeBtn" onclick="window.toggleRecomputeForm()" title="Re-derive historical cost/savings from stored token counts using the current prices">Recompute History</button>
+          </div>
+        </div>
+        <div id="recomputeForm" style="display:none;border:1px solid var(--border);border-radius:6px;padding:12px 14px;margin:8px 0">
+          <p class="muted" style="margin:0 0 10px;font-size:12px">Re-derives cost &amp; savings for logs in this window from stored token counts using the <strong>current</strong> prices. Overwrites stored values — cannot be undone. Clear both fields to recompute all time.</p>
+          <div class="toolbar" style="margin:0">
+            <div class="filters">
+              <label class="field"><span>From</span><input id="rcfrom" type="datetime-local" step="1"></label>
+              <label class="field"><span>To</span><input id="rcto" type="datetime-local" step="1"></label>
+            </div>
+            <div class="filter-actions">
+              <button class="danger" id="rcrun" onclick="window.runRecompute()">Run</button>
+              <button class="secondary" onclick="window.toggleRecomputeForm()">Cancel</button>
+            </div>
+          </div>
+        </div>
+        <div id="pmsg" class="status-msg" style="margin-bottom:6px"></div>
+        <div id="ptbl">Loading…</div>
       </div>
       <div class="panel" id="budgetsPanel" style="margin-bottom:16px"></div>
       <div class="panel" id="costPanel">Loading…</div>
@@ -772,6 +816,128 @@ async function viewCost() {
   await reloadBudgets();
   await reloadCost();
 }
+
+// Toggle the pricing panel; the list is (re)fetched on every open so it is
+// always fresh — the panel DOM is rebuilt on each visit to this view.
+window.togglePricing = async () => {
+  const panel = $("#pricingPanel");
+  const open = panel.style.display === "none";
+  panel.style.display = open ? "" : "none";
+  $("#pricingToggle").textContent = open ? "Hide Pricing" : "Model Pricing";
+  if (open) await reloadPricing();
+};
+
+// Last-fetched pricing items; edit/revert reference rows by index so model
+// names never have to round-trip through onclick attributes.
+let PricingItems = [];
+
+window.reloadPricing = async () => {
+  try {
+    PricingItems = await api("/admin/pricing");
+    if (!PricingItems.length) { $("#ptbl").innerHTML = `<div class="muted">No pricing entries.</div>`; return; }
+    $("#ptbl").innerHTML =
+      `<table><thead><tr><th>Provider</th><th>Model</th><th>Input /1K</th><th>Output /1K</th><th>Cached /1K</th><th>Source</th><th></th></tr></thead>
+       <tbody>${PricingItems.map((p, i) => `<tr>
+         <td>${escapeHtml(p.provider)}</td>
+         <td>${escapeHtml(p.model)}</td>
+         <td>$${p.input_per_1k}</td>
+         <td>$${p.output_per_1k}</td>
+         <td class="muted">${p.cached_input_per_1k != null ? '$' + p.cached_input_per_1k : '-'}</td>
+         <td><span class="pill ${p.source === 'override' ? 'ok' : ''}">${p.source}</span></td>
+         <td style="text-align:right;white-space:nowrap">
+           <button type="button" class="ghost-btn" onclick="window.editPricing(${i})">Edit</button>
+           ${p.source === 'override' ? `<button type="button" class="ghost-btn" onclick="window.revertPricing(${i})">Revert</button>` : ''}
+         </td>
+       </tr>`).join("")}</tbody></table>`;
+  } catch (e) { $("#ptbl").innerHTML = `<div class="status-msg">${escapeHtml(e.message)}</div>`; }
+};
+
+window.editPricing = (i) => {
+  const p = PricingItems[i];
+  if (!p) return;
+  $("#pprov").value = p.provider;
+  $("#pmodel").value = p.model;
+  $("#pin").value = p.input_per_1k;
+  $("#pout").value = p.output_per_1k;
+  $("#pcache").value = p.cached_input_per_1k != null ? p.cached_input_per_1k : "";
+  $("#pmsg").textContent = "";
+  $("#pprov").scrollIntoView({ behavior: "smooth", block: "center" });
+};
+
+window.clearPricingForm = () => {
+  for (const id of ["#pprov", "#pmodel", "#pin", "#pout", "#pcache"]) $(id).value = "";
+  $("#pmsg").textContent = "";
+};
+
+window.savePricing = async () => {
+  const provider = $("#pprov").value.trim();
+  const model = $("#pmodel").value.trim();
+  const input = parseFloat($("#pin").value);
+  const output = parseFloat($("#pout").value);
+  const cachedRaw = $("#pcache").value.trim();
+  if (!provider || !model || !Number.isFinite(input) || !Number.isFinite(output)) {
+    $("#pmsg").textContent = "provider, model, input and output prices are required";
+    return;
+  }
+  const body = { provider, model, input_per_1k: input, output_per_1k: output };
+  if (cachedRaw !== "") {
+    const c = parseFloat(cachedRaw);
+    if (!Number.isFinite(c)) { $("#pmsg").textContent = "cached price must be a number"; return; }
+    body.cached_input_per_1k = c;
+  }
+  try {
+    await api("/admin/pricing", { method: "PUT", body });
+    window.clearPricingForm();
+    await reloadPricing();
+  } catch (e) { $("#pmsg").textContent = e.message; }
+};
+
+// Format a Date as a datetime-local input value (local wall clock).
+function toLocalInputValue(d) {
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+window.toggleRecomputeForm = () => {
+  const form = $("#recomputeForm");
+  const open = form.style.display === "none";
+  form.style.display = open ? "" : "none";
+  if (open && !$("#rcfrom").value && !$("#rcto").value) {
+    // Default window: the last 7 days, in local time.
+    const now = new Date();
+    $("#rcfrom").value = toLocalInputValue(new Date(now.getTime() - 7 * 24 * 3600 * 1000));
+    $("#rcto").value = toLocalInputValue(now);
+  }
+};
+
+window.runRecompute = async () => {
+  const body = {};
+  const from = localInputToUtcMs($("#rcfrom").value); if (from != null) body.from = from;
+  const to = localInputToUtcMs($("#rcto").value); if (to != null) body.to = to;
+  const btn = $("#rcrun");
+  btn.disabled = true;
+  $("#pmsg").textContent = "";
+  try {
+    const r = await api("/admin/pricing/recompute", { method: "POST", body });
+    const missing = (r.models_without_price || []).length
+      ? ` — no price for: ${r.models_without_price.join(", ")}` : "";
+    $("#pmsg").innerHTML = `<span style="color:var(--accent)">Recomputed ${r.updated_rows} rows across ${r.models_matched} models${escapeHtml(missing)}</span>`;
+    $("#recomputeForm").style.display = "none";
+    await reloadCost();
+    await reloadBudgets();
+  } catch (e) { $("#pmsg").textContent = e.message; }
+  btn.disabled = false;
+};
+
+window.revertPricing = async (i) => {
+  const p = PricingItems[i];
+  if (!p) return;
+  if (!confirm(`Revert override for ${p.provider}/${p.model}? It will fall back to the catalog file price (if any).`)) return;
+  try {
+    await api(`/admin/pricing/${encodeURIComponent(p.provider)}/${encodeURIComponent(p.model)}`, { method: "DELETE" });
+    await reloadPricing();
+  } catch (e) { $("#pmsg").textContent = e.message; }
+};
 
 window.reloadBudgets = async () => {
   try {
