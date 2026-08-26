@@ -1,6 +1,6 @@
-use std::time::{Duration, Instant};
-
+use std::io::{self, Write};
 use std::net::SocketAddr;
+use std::time::{Duration, Instant};
 
 use axum::body::Body;
 use axum::extract::{ConnectInfo, Path, State};
@@ -9,6 +9,9 @@ use axum::response::{IntoResponse, Response};
 use bytes::{Bytes, BytesMut};
 use futures::stream::{self, StreamExt};
 use http_body_util::BodyExt;
+use serde::ser::{SerializeMap, SerializeSeq};
+use serde::{Serialize, Serializer};
+use serde_json::Value;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
@@ -84,7 +87,11 @@ async fn proxy_inner(
     let config = state.config_snapshot();
 
     let body_bytes = read_body(body).await?;
-    let request_body_for_log = clip_body_for_log(&body_bytes);
+    // Parse once and reuse for model routing, cache policy, fingerprinting,
+    // and redacted logging. This avoids repeatedly allocating large base64
+    // strings for multimodal requests.
+    let request_json = serde_json::from_slice::<Value>(&body_bytes).ok();
+    let request_body_for_log = request_body_for_log(&body_bytes, request_json.as_ref());
 
     let upstream_path = format!("/{}", tail.trim_start_matches('/'));
 
@@ -96,7 +103,7 @@ async fn proxy_inner(
     );
     log.set_gateway_key(Some(principal.key_id.clone()));
     log.set_request_body(request_body_for_log);
-    let request_model = extract_model(&body_bytes);
+    let request_model = extract_model(request_json.as_ref());
     log.set_model(request_model.clone());
     let client_ua = headers
         .get("user-agent")
@@ -163,24 +170,39 @@ async fn proxy_inner(
     );
     let body_is_cacheable_shape = cache_policy
         .as_ref()
-        .map(|p| p.body_is_cacheable(&body_bytes))
+        .map(|p| p.body_is_cacheable(request_json.as_ref()))
         .unwrap_or(false);
 
-    // Compute fingerprint up front so we can use it for both lookup and
-    // writeback.
-    let fp = fingerprint(&FingerprintInputs {
-        namespace: &namespace,
-        endpoint: &upstream_path,
-        body: &body_bytes,
-        cache_scope: cache_policy.as_ref().and_then(|p| p.cache_scope.as_deref()),
-    });
-    let cache_key = format!("resp:{namespace}:{fp}");
+    // A fingerprint is only useful when this request can read or write the
+    // cache. Disabled, ineligible, and explicit-bypass requests avoid hashing
+    // large bodies entirely.
+    let cache_key = if cache_key_needed(cache_policy.as_ref(), body_is_cacheable_shape) {
+        let policy = cache_policy
+            .as_ref()
+            .expect("cache key eligibility requires a policy");
+        let fp = fingerprint(&FingerprintInputs {
+            namespace: &namespace,
+            endpoint: &upstream_path,
+            body: &body_bytes,
+            json_body: request_json.as_ref(),
+            cache_scope: policy.cache_scope.as_deref(),
+        });
+        Some(format!("resp:{namespace}:{fp}"))
+    } else {
+        None
+    };
 
     // Cache lookup (unless bypassed/refresh).
     let (cache_status, lookup_result) = match cache_policy.as_ref() {
+        Some(_) if !body_is_cacheable_shape => (CacheStatus::Disabled, None),
         Some(p) if matches!(p.directive, CacheDirective::Bypass) => (CacheStatus::Bypass, None),
         Some(p) if matches!(p.directive, CacheDirective::Refresh) => (CacheStatus::Refresh, None),
-        Some(_) => match state.stores.kv.get(&cache_key).await {
+        Some(_) => match state
+            .stores
+            .kv
+            .get(cache_key.as_deref().expect("cacheable request has a key"))
+            .await
+        {
             Ok(Some(blob)) => match CachedResponse::decode(&blob) {
                 Ok(cached) => (CacheStatus::Hit, Some(cached)),
                 Err(e) => {
@@ -246,7 +268,13 @@ async fn proxy_inner(
         }
         log.submit(&state.stores.logs).await;
         metrics::counter!("gateway_cache_response_hit_total").increment(1);
-        return Ok(build_cached_response(cached, cache_status, &cache_key));
+        return Ok(build_cached_response(
+            cached,
+            cache_status,
+            cache_key
+                .as_deref()
+                .expect("cache hit always has a cache key"),
+        ));
     }
 
     if matches!(
@@ -404,8 +432,10 @@ async fn proxy_inner(
             };
             match payload.encode() {
                 Ok(blob) => {
-                    if let Some(ttl) = cache_ttl {
-                        if let Err(e) = kv.put(&cache_key_for_write, Bytes::from(blob), ttl).await {
+                    if let (Some(ttl), Some(cache_key)) =
+                        (cache_ttl, cache_key_for_write.as_deref())
+                    {
+                        if let Err(e) = kv.put(cache_key, Bytes::from(blob), ttl).await {
                             tracing::warn!(error = %e, "failed to write cache");
                         } else {
                             metrics::counter!("gateway_cache_response_write_total").increment(1);
@@ -493,7 +523,12 @@ async fn proxy_inner(
         .body(body)
         .map_err(|e| ApiError::Gateway(GatewayError::Internal(e.to_string())))?;
 
-    insert_cache_headers(response.headers_mut(), cache_status, &cache_key, None);
+    insert_cache_headers(
+        response.headers_mut(),
+        cache_status,
+        cache_key.as_deref(),
+        None,
+    );
     // The `x-gateway-request-id` header is attached by the `proxy_handler`
     // wrapper for every response path.
     Ok(response)
@@ -528,6 +563,11 @@ fn route_matches(route: &RouteConfig, url_namespace: &str, model: Option<&str>) 
     true
 }
 
+fn cache_key_needed(policy: Option<&CachePolicy>, body_is_cacheable: bool) -> bool {
+    body_is_cacheable
+        && policy.is_some_and(|policy| !matches!(policy.directive, CacheDirective::Bypass))
+}
+
 fn build_cached_response(
     cached: CachedResponse,
     cache_status: CacheStatus,
@@ -554,7 +594,7 @@ fn build_cached_response(
     insert_cache_headers(
         response.headers_mut(),
         cache_status,
-        cache_key,
+        Some(cache_key),
         Some(age.max(0) as u64 / 1000),
     );
     response
@@ -563,14 +603,16 @@ fn build_cached_response(
 fn insert_cache_headers(
     headers: &mut HeaderMap,
     status: CacheStatus,
-    key: &str,
+    key: Option<&str>,
     age_s: Option<u64>,
 ) {
     if let Ok(v) = HeaderValue::from_str(status.as_header()) {
         headers.insert(HeaderName::from_static("x-gateway-cache-status"), v);
     }
-    if let Ok(v) = HeaderValue::from_str(&key[..key.len().min(48)]) {
-        headers.insert(HeaderName::from_static("x-gateway-cache-key"), v);
+    if let Some(key) = key {
+        if let Ok(v) = HeaderValue::from_str(&key[..key.len().min(48)]) {
+            headers.insert(HeaderName::from_static("x-gateway-cache-key"), v);
+        }
     }
     if let Some(age) = age_s {
         if let Ok(v) = HeaderValue::from_str(&age.to_string()) {
@@ -631,29 +673,205 @@ async fn read_body(body: Body) -> Result<Bytes, ApiError> {
     Ok(collected.to_bytes())
 }
 
-fn clip_body_for_log(body: &Bytes) -> Option<String> {
+fn request_body_for_log(body: &Bytes, json: Option<&Value>) -> Option<String> {
     if body.is_empty() {
         return None;
     }
+    if let Some(json) = json {
+        return Some(redacted_json_for_log(json));
+    }
+    clip_body_for_log(body)
+}
+
+fn clip_body_for_log(body: &Bytes) -> Option<String> {
     let take = body.len().min(MAX_LOG_BODY_BYTES);
-    match std::str::from_utf8(&body[..take]) {
-        Ok(s) => {
-            if take < body.len() {
-                Some(format!("{s}\n…[truncated]"))
-            } else {
-                Some(s.to_string())
-            }
+    let mut output = String::from_utf8_lossy(&body[..take]).into_owned();
+    if take < body.len() {
+        output.push_str("\n…[truncated]");
+    }
+    Some(output)
+}
+
+struct RedactedJson<'a> {
+    value: &'a Value,
+    force_base64: bool,
+    media_type: Option<&'a str>,
+}
+
+impl<'a> RedactedJson<'a> {
+    fn plain(value: &'a Value) -> Self {
+        Self {
+            value,
+            force_base64: false,
+            media_type: None,
         }
-        Err(_) => Some(format!("[binary {} bytes]", body.len())),
     }
 }
 
-fn extract_model(body: &Bytes) -> Option<String> {
-    if body.is_empty() {
+impl Serialize for RedactedJson<'_> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match self.value {
+            Value::Null => serializer.serialize_unit(),
+            Value::Bool(value) => serializer.serialize_bool(*value),
+            Value::Number(value) => value.serialize(serializer),
+            Value::String(value) => {
+                if let Some(summary) = base64_summary(value, self.force_base64, self.media_type) {
+                    serializer.serialize_str(&summary)
+                } else {
+                    serializer.serialize_str(value)
+                }
+            }
+            Value::Array(values) => {
+                let mut seq = serializer.serialize_seq(Some(values.len()))?;
+                for value in values {
+                    seq.serialize_element(&RedactedJson::plain(value))?;
+                }
+                seq.end()
+            }
+            Value::Object(values) => {
+                let media_type = values
+                    .get("media_type")
+                    .or_else(|| values.get("mime_type"))
+                    .and_then(Value::as_str);
+                let declares_base64 = values
+                    .get("type")
+                    .and_then(Value::as_str)
+                    .is_some_and(|kind| kind.eq_ignore_ascii_case("base64"))
+                    || (media_type.is_some() && values.contains_key("data"));
+
+                let mut map = serializer.serialize_map(Some(values.len()))?;
+                for (key, value) in values {
+                    let force_base64 = is_base64_field_name(key)
+                        || (declares_base64 && key.eq_ignore_ascii_case("data"));
+                    map.serialize_entry(
+                        key,
+                        &RedactedJson {
+                            value,
+                            force_base64,
+                            media_type: force_base64.then_some(media_type).flatten(),
+                        },
+                    )?;
+                }
+                map.end()
+            }
+        }
+    }
+}
+
+fn is_base64_field_name(name: &str) -> bool {
+    name.eq_ignore_ascii_case("base64")
+        || name.eq_ignore_ascii_case("base64_data")
+        || name.eq_ignore_ascii_case("b64_json")
+        || name.to_ascii_lowercase().ends_with("_base64")
+}
+
+fn data_url_parts(value: &str) -> Option<(&str, &str)> {
+    let prefix = value.as_bytes().get(..5)?;
+    if !prefix.eq_ignore_ascii_case(b"data:") {
         return None;
     }
-    let v: serde_json::Value = serde_json::from_slice(body).ok()?;
-    v.get("model")
+    let (metadata, payload) = value.get(5..)?.split_once(',')?;
+    if !metadata
+        .split(';')
+        .any(|part| part.eq_ignore_ascii_case("base64"))
+    {
+        return None;
+    }
+    let media_type = metadata
+        .split(';')
+        .next()
+        .filter(|value| !value.is_empty())
+        .unwrap_or("text/plain");
+    Some((media_type, payload))
+}
+
+fn decoded_base64_len(value: &str) -> usize {
+    let mut significant = 0usize;
+    let mut padding = 0usize;
+    for byte in value.bytes() {
+        if byte.is_ascii_whitespace() {
+            continue;
+        }
+        significant = significant.saturating_add(1);
+        if byte == b'=' {
+            padding = padding.saturating_add(1);
+        }
+    }
+    significant
+        .saturating_mul(6)
+        .checked_div(8)
+        .unwrap_or(0)
+        .saturating_sub(padding.min(2))
+}
+
+fn base64_summary(value: &str, force: bool, media_type: Option<&str>) -> Option<String> {
+    let (media_type, payload) = if force {
+        (media_type.unwrap_or("application/octet-stream"), value)
+    } else {
+        data_url_parts(value)?
+    };
+    Some(format!(
+        "[base64 {media_type}, {} bytes]",
+        decoded_base64_len(payload)
+    ))
+}
+
+struct LogBodyWriter {
+    bytes: Vec<u8>,
+    truncated: bool,
+}
+
+impl LogBodyWriter {
+    fn new() -> Self {
+        Self {
+            bytes: Vec::with_capacity(MAX_LOG_BODY_BYTES.min(8 * 1024)),
+            truncated: false,
+        }
+    }
+}
+
+impl Write for LogBodyWriter {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        let remaining = MAX_LOG_BODY_BYTES.saturating_sub(self.bytes.len());
+        if remaining == 0 {
+            self.truncated = true;
+            return Err(io::Error::new(
+                io::ErrorKind::WriteZero,
+                "request log body limit reached",
+            ));
+        }
+        let take = remaining.min(buf.len());
+        self.bytes.extend_from_slice(&buf[..take]);
+        if take < buf.len() {
+            self.truncated = true;
+        }
+        Ok(take)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+fn redacted_json_for_log(value: &Value) -> String {
+    let mut writer = LogBodyWriter::new();
+    let result = serde_json::to_writer(&mut writer, &RedactedJson::plain(value));
+    if result.is_err() && !writer.truncated {
+        return "[failed to serialize request JSON]".to_string();
+    }
+    let mut output = String::from_utf8_lossy(&writer.bytes).into_owned();
+    if writer.truncated {
+        output.push_str("\n…[truncated]");
+    }
+    output
+}
+
+fn extract_model(body: Option<&Value>) -> Option<String> {
+    body?
+        .get("model")
         .and_then(|m| m.as_str())
         .map(|s| s.to_string())
 }
@@ -670,6 +888,113 @@ fn captured_body_to_string(buf: &BytesMut, truncated: bool) -> Option<String> {
         Some(format!("{s}\n…[truncated]"))
     } else {
         Some(s)
+    }
+}
+
+#[cfg(test)]
+mod request_log_tests {
+    use super::*;
+
+    fn render(value: &Value) -> String {
+        let body = Bytes::from(serde_json::to_vec(value).unwrap());
+        request_body_for_log(&body, Some(value)).unwrap()
+    }
+
+    #[test]
+    fn redacts_nested_image_data_url_with_decoded_size() {
+        let value = serde_json::json!({
+            "messages": [{
+                "role": "user",
+                "content": [{
+                    "type": "image_url",
+                    "image_url": {
+                        "url": "data:image/jpeg;base64,YWJjZA=="
+                    }
+                }]
+            }]
+        });
+
+        let output = render(&value);
+        assert!(output.contains("[base64 image/jpeg, 4 bytes]"));
+        assert!(!output.contains("YWJjZA=="));
+    }
+
+    #[test]
+    fn redacts_anthropic_base64_source_with_media_type() {
+        let value = serde_json::json!({
+            "content": [{
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": "image/png",
+                    "data": "AQIDBAU="
+                }
+            }]
+        });
+
+        let output = render(&value);
+        assert!(output.contains("[base64 image/png, 5 bytes]"));
+        assert!(!output.contains("AQIDBAU="));
+    }
+
+    #[test]
+    fn redacts_large_base64_before_log_truncation() {
+        let payload = "A".repeat(100_000);
+        let value = serde_json::json!({
+            "image_url": format!("data:image/jpeg;base64,{payload}"),
+            "prompt": "read this image"
+        });
+
+        let output = render(&value);
+        assert!(output.contains("[base64 image/jpeg, 75000 bytes]"));
+        assert!(output.contains("read this image"));
+        assert!(!output.contains("…[truncated]"));
+        assert!(!output.contains(&payload[..128]));
+    }
+
+    #[test]
+    fn leaves_non_base64_data_urls_unchanged() {
+        let value = serde_json::json!({"url": "data:text/plain,hello"});
+        assert!(render(&value).contains("data:text/plain,hello"));
+    }
+}
+
+#[cfg(test)]
+mod cache_key_tests {
+    use super::*;
+
+    fn policy(directive: CacheDirective) -> CachePolicy {
+        CachePolicy {
+            directive,
+            ttl: Duration::from_secs(60),
+            cache_scope: None,
+            allow_nondeterministic: false,
+        }
+    }
+
+    #[test]
+    fn skips_key_when_cache_cannot_be_used() {
+        assert!(!cache_key_needed(None, true));
+        assert!(!cache_key_needed(
+            Some(&policy(CacheDirective::Default)),
+            false
+        ));
+        assert!(!cache_key_needed(
+            Some(&policy(CacheDirective::Bypass)),
+            true
+        ));
+    }
+
+    #[test]
+    fn computes_key_for_lookup_and_refresh() {
+        assert!(cache_key_needed(
+            Some(&policy(CacheDirective::Default)),
+            true
+        ));
+        assert!(cache_key_needed(
+            Some(&policy(CacheDirective::Refresh)),
+            true
+        ));
     }
 }
 

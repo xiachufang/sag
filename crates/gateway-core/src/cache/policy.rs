@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use http::HeaderMap;
+use serde_json::Value;
 
 /// Per-request cache directive parsed from the `X-Gateway-Cache` and
 /// related headers.
@@ -96,17 +97,51 @@ impl CachePolicy {
 
     /// Reject caching for non-deterministic bodies unless the caller
     /// explicitly opted in via `X-Gateway-Cache-Force`.
-    pub fn body_is_cacheable(&self, body: &[u8]) -> bool {
+    pub fn body_is_cacheable(&self, body: Option<&Value>) -> bool {
+        let Some(body) = body else {
+            return false;
+        };
         if self.allow_nondeterministic {
             return true;
         }
-        match serde_json::from_slice::<serde_json::Value>(body) {
-            Ok(v) => {
-                let temperature = v.get("temperature").and_then(|t| t.as_f64()).unwrap_or(0.0);
-                let top_p = v.get("top_p").and_then(|t| t.as_f64()).unwrap_or(1.0);
-                temperature == 0.0 && top_p >= 0.999
-            }
-            Err(_) => false,
+        let temperature = body
+            .get("temperature")
+            .and_then(|t| t.as_f64())
+            .unwrap_or(0.0);
+        let top_p = body.get("top_p").and_then(|t| t.as_f64()).unwrap_or(1.0);
+        temperature == 0.0 && top_p >= 0.999
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn policy(allow_nondeterministic: bool) -> CachePolicy {
+        CachePolicy {
+            directive: CacheDirective::Default,
+            ttl: Duration::from_secs(60),
+            cache_scope: None,
+            allow_nondeterministic,
         }
+    }
+
+    #[test]
+    fn preserves_existing_temperature_defaults() {
+        let p = policy(false);
+        assert!(p.body_is_cacheable(Some(&serde_json::json!({"input": "hello"}))));
+        assert!(p.body_is_cacheable(Some(
+            &serde_json::json!({"input": "hello", "temperature": 0})
+        )));
+        assert!(!p.body_is_cacheable(Some(
+            &serde_json::json!({"input": "hello", "temperature": 0.5})
+        )));
+    }
+
+    #[test]
+    fn override_still_requires_valid_json() {
+        let p = policy(true);
+        assert!(p.body_is_cacheable(Some(&serde_json::json!({"input": "hello"}))));
+        assert!(!p.body_is_cacheable(None));
     }
 }

@@ -68,7 +68,17 @@ pub fn extract_token_usage(body: &BytesMut) -> TokenUsage {
 fn from_value(v: &Value) -> TokenUsage {
     let mut u = TokenUsage::default();
 
-    if let Some(usage) = v.get("usage").and_then(|x| x.as_object()) {
+    // Non-streaming OpenAI/Anthropic responses expose `usage` at the top
+    // level. OpenAI Responses API streaming events (notably
+    // `response.completed`) wrap the complete response, including usage,
+    // under a `response` object.
+    let usage = v.get("usage").and_then(|x| x.as_object()).or_else(|| {
+        v.get("response")
+            .and_then(|response| response.get("usage"))
+            .and_then(|x| x.as_object())
+    });
+
+    if let Some(usage) = usage {
         u.prompt = usage
             .get("prompt_tokens")
             .or_else(|| usage.get("input_tokens"))
@@ -82,6 +92,12 @@ fn from_value(v: &Value) -> TokenUsage {
             .get("prompt_tokens_details")
             .and_then(|d| d.get("cached_tokens"))
             .and_then(|x| x.as_i64())
+            .or_else(|| {
+                usage
+                    .get("input_tokens_details")
+                    .and_then(|d| d.get("cached_tokens"))
+                    .and_then(|x| x.as_i64())
+            })
             .or_else(|| {
                 usage
                     .get("cache_read_input_tokens")
@@ -122,10 +138,13 @@ pub fn extract_response_id(body: &BytesMut) -> Option<String> {
 }
 
 fn id_from_value(v: &Value) -> Option<String> {
-    v.get("id")
-        .and_then(|x| x.as_str())
-        .filter(|s| !s.is_empty())
-        .map(|s| s.to_string())
+    let non_empty_id = |value: &Value| value.as_str().filter(|s| !s.is_empty()).map(str::to_string);
+
+    v.get("id").and_then(non_empty_id).or_else(|| {
+        v.get("response")
+            .and_then(|response| response.get("id"))
+            .and_then(non_empty_id)
+    })
 }
 
 fn trim_ascii(s: &[u8]) -> &[u8] {
@@ -185,5 +204,47 @@ mod tests {
         assert_eq!(u.completion, Some(7));
         assert_eq!(u.cached, Some(3));
         assert_eq!(u.total_tokens(), Some(19));
+    }
+
+    #[test]
+    fn parses_openai_responses_non_streaming() {
+        let body = br#"{
+            "id":"resp_123",
+            "usage":{
+                "input_tokens":37,
+                "input_tokens_details":{"cached_tokens":5},
+                "output_tokens":11,
+                "total_tokens":48
+            }
+        }"#;
+        let mut buf = BytesMut::new();
+        buf.extend_from_slice(body);
+
+        let u = extract_token_usage(&buf);
+        assert_eq!(u.prompt, Some(37));
+        assert_eq!(u.completion, Some(11));
+        assert_eq!(u.cached, Some(5));
+        assert_eq!(u.total_tokens(), Some(48));
+        assert_eq!(extract_response_id(&buf).as_deref(), Some("resp_123"));
+    }
+
+    #[test]
+    fn parses_openai_responses_completed_stream_event() {
+        let body = br#"event: response.created
+data: {"type":"response.created","response":{"id":"resp_123","usage":null}}
+
+event: response.completed
+data: {"type":"response.completed","response":{"id":"resp_123","usage":{"input_tokens":37,"input_tokens_details":{"cached_tokens":5},"output_tokens":11,"total_tokens":48}}}
+
+"#;
+        let mut buf = BytesMut::new();
+        buf.extend_from_slice(body);
+
+        let u = extract_token_usage(&buf);
+        assert_eq!(u.prompt, Some(37));
+        assert_eq!(u.completion, Some(11));
+        assert_eq!(u.cached, Some(5));
+        assert_eq!(u.total_tokens(), Some(48));
+        assert_eq!(extract_response_id(&buf).as_deref(), Some("resp_123"));
     }
 }
