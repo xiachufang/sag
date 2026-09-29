@@ -28,7 +28,8 @@
 
 1. [快速开始](./getting-started.md) — 5 分钟跑起来。
 2. [代理 API](./proxy-api.md) — 客户端怎么调网关。
-3. [配置参考](./configuration.md) — 所有 YAML 字段。
-4. [部署指南](./deployment.md) — Lite vs Standard,生产注意事项。
+3. [管理界面](./admin-ui.md) — 用页面管理 Key、日志、成本和模型价格。
+4. [配置参考](./configuration.md) — 所有 YAML 字段。
+5. [部署指南](./deployment.md) — Lite vs Standard,生产注意事项。
 
 需要排查问题或对接监控时,看 [可观测性](./observability.md) 和 [Admin API](./admin-api.md)。

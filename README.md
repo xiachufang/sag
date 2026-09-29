@@ -63,6 +63,26 @@ docker compose up --build
 | `/metrics`            | Prometheus 指标         |
 
 
+## 管理界面截图
+
+Admin UI 位于 `http://localhost:8080/ui/`,登录后可以完成 API Key 管理、请求日志筛选、成本统计和模型价格维护等主要操作。
+
+### API Key 管理
+
+![API Key 管理](docs/src/assets/admin-ui/admin-keys.png)
+
+### 请求日志
+
+![请求日志](docs/src/assets/admin-ui/admin-logs.png)
+
+### 成本统计
+
+![成本统计](docs/src/assets/admin-ui/admin-cost.png)
+
+### 模型价格维护
+
+![模型价格维护](docs/src/assets/admin-ui/admin-model-pricing.png)
+
 ## 使用示例
 
 通过网关调用 OpenAI:
@@ -104,7 +124,7 @@ crates/
 └── gateway-ui/        # 内置管理 UI(打包后的静态文件)
 migrations/            # SQLite 和 Postgres 数据库迁移
 config/                # 示例配置
-pricing-catalog.json   # 默认定价表(供成本核算,启动时通过 --pricing-catalog / GATEWAY_PRICING_CATALOG 指定路径)
+pricing-catalog.json   # 可选价格覆盖(基础价格来自 OpenRouter;通过 --pricing-catalog / GATEWAY_PRICING_CATALOG 指定路径)
 scripts/mock-openai.py # 集成测试用的 mock 上游
 ```
 

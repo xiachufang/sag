@@ -12,7 +12,7 @@ use crate::auth::AdminPrincipal;
 use crate::error::ApiError;
 use crate::state::AppState;
 
-/// Merge admin-set override rows on top of the file catalog. Also used at
+/// Merge admin-set override rows on top of the base catalog. Also used at
 /// boot (gateway-bin) to build the initial effective catalog.
 pub fn merged_catalog(base: &PricingCatalog, rows: Vec<PricingRow>) -> PricingCatalog {
     base.with_overrides(rows.into_iter().map(row_to_entry))
@@ -68,7 +68,7 @@ pub async fn list_pricing(
             source: if override_keys.contains(&(e.provider.clone(), e.model.clone())) {
                 "override"
             } else {
-                "catalog"
+                merged.source(&e.provider, &e.model)
             },
         })
         .collect();

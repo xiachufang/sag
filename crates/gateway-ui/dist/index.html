@@ -779,7 +779,7 @@ async function viewCost() {
       </div>
       <div class="panel" id="pricingPanel" style="margin-bottom:16px;display:none">
         <h3 style="margin:0 0 4px;font-size:14px">Model Pricing</h3>
-        <p class="muted" style="margin:0 0 12px;font-size:12px">USD per 1K tokens. Prices saved here override the pricing catalog file and apply immediately.</p>
+        <p class="muted" style="margin:0 0 12px;font-size:12px">USD per 1K tokens. Base prices come from OpenRouter. The pricing catalog file can override them; prices saved here override the same provider/model entry immediately. Provider * applies to all upstreams.</p>
         <div class="toolbar" style="margin-bottom:4px">
           <div class="filters">
             <label class="field"><span>Provider</span><input id="pprov" placeholder="openai"></label>
@@ -932,7 +932,7 @@ window.runRecompute = async () => {
 window.revertPricing = async (i) => {
   const p = PricingItems[i];
   if (!p) return;
-  if (!confirm(`Revert override for ${p.provider}/${p.model}? It will fall back to the catalog file price (if any).`)) return;
+  if (!confirm(`Revert override for ${p.provider}/${p.model}? It will fall back to the file or OpenRouter base price (if any).`)) return;
   try {
     await api(`/admin/pricing/${encodeURIComponent(p.provider)}/${encodeURIComponent(p.model)}`, { method: "DELETE" });
     await reloadPricing();

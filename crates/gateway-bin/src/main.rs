@@ -36,7 +36,7 @@ struct Cli {
     )]
     config: PathBuf,
 
-    /// Path to the pricing catalog JSON used for cost accounting.
+    /// Optional JSON price overrides, layered over OpenRouter base prices.
     #[arg(
         long,
         env = "GATEWAY_PRICING_CATALOG",
@@ -79,16 +79,29 @@ async fn main() -> Result<()> {
     let proxy = Arc::new(ProxyEngine::new(&config).context("failed to construct proxy engine")?);
 
     let config_arc = Arc::new(ArcSwap::from_pointee(config.clone()));
-    let pricing_base = Arc::new(
-        PricingCatalog::from_path(&cli.pricing_catalog).with_context(|| {
+    let file_prices =
+        PricingCatalog::from_optional_path(&cli.pricing_catalog).with_context(|| {
             format!(
                 "failed to load pricing catalog {}",
                 cli.pricing_catalog.display()
             )
-        })?,
-    );
+        })?;
+    let remote_prices = match PricingCatalog::from_openrouter().await {
+        Ok(catalog) => {
+            tracing::info!(
+                models = catalog.entries().count(),
+                "loaded OpenRouter base prices"
+            );
+            catalog
+        }
+        Err(error) => {
+            tracing::warn!(%error, "failed to load OpenRouter prices; using local prices only");
+            PricingCatalog::default()
+        }
+    };
+    let pricing_base = Arc::new(remote_prices.with_overrides(file_prices.entries().cloned()));
     // Layer admin-set overrides (persisted via /admin/pricing) on top of the
-    // file catalog so they survive restarts.
+    // OpenRouter + file catalog so they survive restarts.
     let pricing_overrides = stores
         .metadata
         .list_pricing()

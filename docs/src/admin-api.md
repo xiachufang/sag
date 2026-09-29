@@ -192,8 +192,8 @@
 | `gateway_key_id` | string | 按 Key 过滤。 |
 | `namespace` | string | 按 URL namespace 过滤(对应 `/v1/{namespace}/...` 段)。 |
 | `model` | string | 按模型名过滤(精确)。 |
-| `status` | string | `ok` / `gateway_error` / `upstream_error`。 |
-| `from` / `to` | int | unix 秒,时间范围。 |
+| `status` | string | `success` / `upstream_error` / `gateway_error` / `timeout` / `cancelled`。 |
+| `from` / `to` | int | unix 毫秒,时间范围。 |
 | `limit` | int | 默认 50,上限 200。 |
 | `cursor` | string | 上一页响应里的 `next_cursor`。 |
 
@@ -235,22 +235,122 @@
 | 参数 | 说明 |
 | --- | --- |
 | `project_id` | 限定项目。 |
-| `from` / `to` | 时间范围(unix 秒)。 |
-| `group_by` | `namespace` / `model` / `gateway_key_id` / `day` 之一(或逗号分隔的组合)。 |
+| `from` / `to` | 时间范围(unix 毫秒)。 |
+| `group_by` | `namespace` / `model` / `gateway_key` / `day` / `hour` 之一,或逗号分隔的组合。`key` 是 `gateway_key` 的别名。 |
 
 响应:
 
 ```json
 {
-  "rows": [
+  "groups": [
     {
-      "key": "openai",
-      "input_tokens": 12345,
-      "output_tokens": 6789,
-      "cost_usd": 0.12
+      "key": { "namespace": "openai", "model": "gpt-4o-mini" },
+      "requests": 42,
+      "prompt_tokens": 12345,
+      "completion_tokens": 6789,
+      "cost_usd": 0.12,
+      "cached_savings_usd": 0.03
     }
   ],
-  "total_usd": 0.12
+  "total_cost_usd": 0.12
+}
+```
+
+---
+
+## 模型价格 `/admin/pricing`
+
+模型价格用于按请求日志中的 provider、model 和 token 用量计算成本。启动时先从 OpenRouter Models API 加载基础价格,按完整 `canonical_slug` 或其最后一段匹配模型名,再加载 `pricing-catalog.json` 覆盖文件。Admin 设置的 override 会覆盖同名 `(provider, model)` 条目并立即生效。`provider: "*"` 表示适用于所有上游的通用价格。
+
+### GET `/admin/pricing`
+
+返回当前生效的模型价格列表。
+
+权限:Any。
+
+响应:
+
+```json
+[
+  {
+    "provider": "openai",
+    "model": "gpt-4o-mini",
+    "input_per_1k": 0.00015,
+    "output_per_1k": 0.0006,
+    "cached_input_per_1k": 0.000075,
+    "source": "catalog"
+  }
+]
+```
+
+`source` 取值:
+
+- `openrouter` — 来自 OpenRouter API,以完整 canonical slug 展示,provider 为 `*`。
+- `catalog` — 来自 `pricing-catalog.json`。
+- `override` — 来自 Admin 存储,会覆盖 catalog 中相同 `(provider, model)` 的价格。
+
+### PUT `/admin/pricing`
+
+新增或更新一个模型价格 override。
+
+权限:Any。
+
+请求:
+
+```json
+{
+  "provider": "openai",
+  "model": "gpt-4o-mini",
+  "input_per_1k": 0.00015,
+  "output_per_1k": 0.0006,
+  "cached_input_per_1k": 0.000075
+}
+```
+
+字段约束:`provider` 和 `model` 非空;价格必须是大于等于 0 的有限数字。`cached_input_per_1k` 可省略,省略时缓存输入按 `input_per_1k` 计价。
+
+响应:
+
+```json
+{ "ok": true }
+```
+
+### DELETE `/admin/pricing/:provider/:model`
+
+删除一个模型价格 override。删除后如果 catalog 中存在同名条目,会回退到文件或 OpenRouter 基础价格;否则该模型没有可用价格,后续请求仍会记录 token,但无法计算成本。
+
+权限:Any。
+
+响应:
+
+```json
+{ "ok": true }
+```
+
+### POST `/admin/pricing/recompute`
+
+用当前生效的模型价格重新计算历史请求日志里的 `cost_usd` 和 `would_have_cost_usd`。
+
+权限:Any。
+
+请求:
+
+```json
+{
+  "from": 1715760000000,
+  "to": 1715846400000
+}
+```
+
+`from` / `to` 都是可选的 unix 毫秒时间戳;都省略时会重算全部历史。这个操作会覆盖已落库的历史成本字段,执行前建议先限定时间范围。
+
+响应:
+
+```json
+{
+  "updated_rows": 128,
+  "models_matched": 3,
+  "models_without_price": ["unknown-provider/unknown-model"]
 }
 ```
 
@@ -298,4 +398,3 @@ for i in 1 2 3; do
     | jq '{name, secret}'
 done
 ```
-

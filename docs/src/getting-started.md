@@ -123,10 +123,15 @@ curl -X POST http://localhost:8080/admin/auth/login \
 
 ## 6. 看一眼内置 UI
 
-浏览器打开 [http://localhost:8080/ui/](http://localhost:8080/ui/),用刚才创建的账号密码登录(或粘贴 root token),可以看到 Key、日志、Cost 聚合。
+浏览器打开 [http://localhost:8080/ui/](http://localhost:8080/ui/),用刚才创建的 admin 账号密码登录,可以看到 Key、日志、Cost 聚合。
+
+UI 登录不直接接受 root token。root token 用于创建第一个 admin 账号,后续 UI 通过用户名密码换取 12 小时有效的 Admin JWT。
+
+更多界面截图和操作说明见 [管理界面](./admin-ui.md)。
 
 ## 接下来
 
 - 想搞清楚每个 YAML 字段:[配置参考](./configuration.md)
+- 想用页面管理 Key、日志和成本:[管理界面](./admin-ui.md)
 - 想用脚本管理 Key、查日志:[Admin API](./admin-api.md)
 - 想上生产:[部署指南](./deployment.md)

@@ -21,9 +21,11 @@ struct CatalogFile {
     models: Vec<PricingEntry>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct PricingCatalog {
     by_key: HashMap<(String, String), PricingEntry>,
+    pub(super) openrouter: HashMap<String, PricingEntry>,
+    pub(super) openrouter_by_model: HashMap<String, String>,
 }
 
 impl PricingCatalog {
@@ -34,7 +36,10 @@ impl PricingCatalog {
         for e in f.models {
             by_key.insert((e.provider.clone(), e.model.clone()), e);
         }
-        Ok(Self { by_key })
+        Ok(Self {
+            by_key,
+            ..Self::default()
+        })
     }
 
     pub fn from_path(path: &Path) -> Result<Self> {
@@ -43,22 +48,53 @@ impl PricingCatalog {
         Self::from_str(&text)
     }
 
+    /// A missing overrides file is fine; malformed or unreadable files are not.
+    pub fn from_optional_path(path: &Path) -> Result<Self> {
+        match std::fs::read_to_string(path) {
+            Ok(text) => Self::from_str(&text),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Self::default()),
+            Err(e) => Err(GatewayError::Internal(format!(
+                "read catalog {}: {e}",
+                path.display()
+            ))),
+        }
+    }
+
     /// Return a copy of this catalog with `overrides` layered on top —
-    /// an override for the same (provider, model) replaces the file entry,
+    /// an override for the same (provider, model) replaces the base entry,
     /// and overrides for unknown models are added.
     pub fn with_overrides<I>(&self, overrides: I) -> Self
     where
         I: IntoIterator<Item = PricingEntry>,
     {
-        let mut by_key = self.by_key.clone();
+        let mut catalog = self.clone();
         for e in overrides {
-            by_key.insert((e.provider.clone(), e.model.clone()), e);
+            catalog
+                .by_key
+                .insert((e.provider.clone(), e.model.clone()), e);
         }
-        Self { by_key }
+        catalog
     }
 
     pub fn entries(&self) -> impl Iterator<Item = &PricingEntry> {
-        self.by_key.values()
+        self.by_key
+            .values()
+            .chain(self.openrouter.values().filter(|e| {
+                !self
+                    .by_key
+                    .contains_key(&(e.provider.clone(), e.model.clone()))
+            }))
+    }
+
+    pub fn source(&self, provider: &str, model: &str) -> &'static str {
+        if self
+            .by_key
+            .contains_key(&(provider.to_string(), model.to_string()))
+        {
+            "catalog"
+        } else {
+            "openrouter"
+        }
     }
 
     pub fn lookup(&self, provider: &str, model: &str) -> Option<&PricingEntry> {
@@ -74,6 +110,19 @@ impl PricingCatalog {
                     }
                 });
                 stripped.and_then(|m| self.by_key.get(&(provider.to_string(), m)))
+            })
+            .or_else(|| self.by_key.get(&("*".to_string(), model.to_string())))
+            .or_else(|| {
+                // Full canonical slugs take precedence over their last path segment.
+                let entry = self.openrouter.get(model).or_else(|| {
+                    self.openrouter_by_model
+                        .get(model)
+                        .and_then(|slug| self.openrouter.get(slug))
+                })?;
+                self.by_key
+                    .get(&(provider.to_string(), entry.model.clone()))
+                    .or_else(|| self.by_key.get(&("*".to_string(), entry.model.clone())))
+                    .or(Some(entry))
             })
     }
 }

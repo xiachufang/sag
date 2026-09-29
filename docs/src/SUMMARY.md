@@ -10,6 +10,7 @@
 # 使用
 
 - [代理 API](./proxy-api.md)
+- [管理界面](./admin-ui.md)
 - [Admin API](./admin-api.md)
 
 # 运维

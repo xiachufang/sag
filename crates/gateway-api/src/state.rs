@@ -19,10 +19,10 @@ pub struct AppState {
     pub admin_root_token: Option<String>,
     pub master_key: Arc<MasterKey>,
     pub admin_signer: Arc<AdminTokenSigner>,
-    /// Effective pricing: catalog file merged with admin-set overrides.
+    /// Effective pricing: OpenRouter, catalog file, then admin-set overrides.
     /// Swapped atomically when overrides change via the admin API.
     pub pricing: Arc<ArcSwap<PricingCatalog>>,
-    /// The catalog as loaded from the file, kept pristine so overrides can
+    /// OpenRouter prices merged with file overrides, kept pristine so admin overrides can
     /// be re-merged (or reverted) without a restart.
     pub pricing_base: Arc<PricingCatalog>,
     pub budgets: Arc<BudgetManager>,
