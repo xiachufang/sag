@@ -241,7 +241,12 @@ mod tests {
         tokio::spawn(async move {
             let (mut socket, _) = listener.accept().await.unwrap();
             let mut buffer = [0; 4096];
-            socket.read(&mut buffer).await.unwrap();
+            let mut request = Vec::new();
+            while !request.windows(4).any(|window| window == b"\r\n\r\n") {
+                let read = socket.read(&mut buffer).await.unwrap();
+                assert!(read > 0, "connection closed before request headers arrived");
+                request.extend_from_slice(&buffer[..read]);
+            }
             socket.write_all(response.as_bytes()).await.unwrap();
         });
         url
