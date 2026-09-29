@@ -16,6 +16,8 @@ struct ModelsResponse {
 
 #[derive(Deserialize)]
 struct Model {
+    #[serde(default)]
+    id: String,
     canonical_slug: String,
     pricing: Price,
 }
@@ -30,6 +32,23 @@ struct Price {
 fn per_1k(value: &str) -> Option<f64> {
     let price = value.parse::<f64>().ok()? * 1000.0;
     (price.is_finite() && price >= 0.0).then_some(price)
+}
+
+fn unique_last_segments<'a>(
+    names: impl Iterator<Item = (&'a String, &'a String)>,
+) -> HashMap<String, String> {
+    let mut aliases = HashMap::new();
+    let mut ambiguous = HashSet::new();
+    for (name, id) in names {
+        let short = name.rsplit('/').next().unwrap().to_string();
+        if let Some(previous) = aliases.insert(short.clone(), id.clone()) {
+            if previous != *id {
+                ambiguous.insert(short);
+            }
+        }
+    }
+    aliases.retain(|name, _| !ambiguous.contains(name));
+    aliases
 }
 
 impl PricingCatalog {
@@ -55,7 +74,7 @@ impl PricingCatalog {
         let mut response: ModelsResponse = serde_json::from_str(json)?;
         let mut catalog = Self::default();
         // Different API IDs can share a canonical slug (e.g. batch variants).
-        // Prefer standard prices over variant prices; IDs are not lookup keys.
+        // Prefer standard prices for canonical lookups, while preserving each ID's price.
         response.data.sort_by_key(|value| {
             value
                 .get("id")
@@ -68,6 +87,14 @@ impl PricingCatalog {
             };
             let slug = model.canonical_slug;
             if slug.is_empty() || slug.ends_with('/') {
+                continue;
+            }
+            let id = if model.id.is_empty() {
+                slug.clone()
+            } else {
+                model.id
+            };
+            if id.ends_with('/') || catalog.openrouter.contains_key(&id) {
                 continue;
             }
             let (Some(input), Some(output)) = (
@@ -84,32 +111,30 @@ impl PricingCatalog {
                 None => None,
             };
             catalog
-                .openrouter
+                .openrouter_by_slug
                 .entry(slug.clone())
-                .or_insert(PricingEntry {
+                .or_insert(id.clone());
+            catalog.openrouter_slugs.insert(id.clone(), slug);
+            catalog.openrouter.insert(
+                id.clone(),
+                PricingEntry {
                     provider: "*".into(),
-                    model: slug,
+                    model: id,
                     input_per_1k: input,
                     output_per_1k: output,
                     cached_input_per_1k: cached,
-                });
+                },
+            );
         }
         if catalog.openrouter.is_empty() {
             return Err(GatewayError::Internal(
                 "OpenRouter returned no usable model prices".into(),
             ));
         }
-        let mut by_model = HashMap::new();
-        let mut ambiguous = HashSet::new();
-        for slug in catalog.openrouter.keys() {
-            let name = slug.rsplit('/').next().unwrap().to_string();
-            if by_model.insert(name.clone(), slug.clone()).is_some() {
-                ambiguous.insert(name);
-            }
-        }
-        // Ambiguous short names require a full canonical slug or a local price.
-        by_model.retain(|name, _| !ambiguous.contains(name));
-        catalog.openrouter_by_model = by_model;
+        // Ambiguous short names require a full slug/ID or a local price.
+        catalog.openrouter_by_slug_model = unique_last_segments(catalog.openrouter_by_slug.iter());
+        catalog.openrouter_by_id_model =
+            unique_last_segments(catalog.openrouter.keys().map(|id| (id, id)));
         Ok(catalog)
     }
 }
@@ -129,9 +154,14 @@ mod tests {
     #[test]
     fn canonical_slug_then_last_segment_with_per_token_conversion() {
         let catalog = PricingCatalog::parse_openrouter(MODELS).unwrap();
-        for model in ["vendor/model-20260101", "model-20260101"] {
+        for model in [
+            "vendor/model-20260101",
+            "model-20260101",
+            "vendor/alias",
+            "alias",
+        ] {
             let price = catalog.lookup("custom-upstream", model).unwrap();
-            assert_eq!(price.model, "vendor/model-20260101");
+            assert_eq!(price.model, "vendor/alias");
             assert!((price.input_per_1k - 0.002).abs() < 1e-12);
             assert!((price.output_per_1k - 0.01).abs() < 1e-12);
             assert!((price.cached_input_per_1k.unwrap() - 0.0002).abs() < 1e-12);
@@ -148,8 +178,16 @@ mod tests {
             .unwrap();
             assert!((cost.cost_usd - 0.00556).abs() < 1e-12);
         }
-        assert!(catalog.lookup("vendor", "alias").is_none());
-        assert!(catalog.lookup("vendor", "vendor/alias").is_none());
+        for model in ["vendor/alias:batch", "alias:batch"] {
+            assert_eq!(catalog.lookup("any", model).unwrap().input_per_1k, 0.001);
+        }
+        let names: Vec<_> = catalog
+            .entries()
+            .map(|entry| entry.model.as_str())
+            .collect();
+        assert!(names.contains(&"vendor/alias"));
+        assert!(names.contains(&"vendor/alias:batch"));
+        assert!(!names.contains(&"vendor/model-20260101"));
         assert_eq!(catalog.lookup("any", "free").unwrap().input_per_1k, 0.0);
         assert_eq!(
             catalog.lookup("any", "free").unwrap().cached_input_per_1k,
@@ -186,7 +224,12 @@ mod tests {
         ]}"#).unwrap();
         let base = remote.with_overrides(file.entries().cloned());
         assert_eq!(base.entries().count(), 3);
-        for model in ["vendor/model-20260101", "model-20260101"] {
+        for model in [
+            "vendor/model-20260101",
+            "model-20260101",
+            "vendor/alias",
+            "alias",
+        ] {
             assert_eq!(base.lookup("any", model).unwrap().input_per_1k, 0.02);
         }
         assert_eq!(base.lookup("custom", "free").unwrap().input_per_1k, 0.04);
@@ -229,6 +272,80 @@ mod tests {
         assert!(catalog.lookup("any", "good").is_some());
         assert!(PricingCatalog::parse_openrouter(r#"{"data":[]}"#).is_err());
         assert!(PricingCatalog::parse_openrouter(r#"{"error":"unavailable"}"#).is_err());
+    }
+
+    #[test]
+    fn luna_id_and_canonical_names_share_prices_and_id_overrides() {
+        let base = PricingCatalog::parse_openrouter(r#"{"data":[
+            {"id":"openai/gpt-6-luna","canonical_slug":"openai/gpt-6-luna-20260922","pricing":{"prompt":"0.0000001","completion":"0.0000005"}}
+        ]}"#).unwrap();
+        let price = base.entries().next().unwrap();
+        assert_eq!(price.model, "openai/gpt-6-luna");
+        let overridden = base.with_overrides([PricingEntry {
+            provider: "*".into(),
+            model: price.model.clone(),
+            input_per_1k: 0.0,
+            output_per_1k: 0.0,
+            cached_input_per_1k: None,
+        }]);
+        assert_eq!(overridden.entries().count(), 1);
+        assert_eq!(overridden.source("*", "openai/gpt-6-luna"), "catalog");
+        for model in [
+            "openai/gpt-6-luna-20260922",
+            "gpt-6-luna-20260922",
+            "openai/gpt-6-luna",
+            "gpt-6-luna",
+        ] {
+            let usage = TokenUsage {
+                prompt: 1000,
+                completion: 1000,
+                cached: 0,
+            };
+            let cost = compute_cost(&base, "openrouter", model, usage).unwrap();
+            assert!((cost.cost_usd - 0.0006).abs() < 1e-12);
+            assert_eq!(
+                compute_cost(&overridden, "openrouter", model, usage)
+                    .unwrap()
+                    .cost_usd,
+                0.0
+            );
+        }
+    }
+
+    #[test]
+    fn canonical_names_win_over_conflicting_ids() {
+        let catalog = PricingCatalog::parse_openrouter(r#"{"data":[
+            {"id":"vendor/release","canonical_slug":"vendor/canonical","pricing":{"prompt":"1","completion":"1"}},
+            {"id":"vendor/canonical","canonical_slug":"other/dated","pricing":{"prompt":"2","completion":"2"}},
+            {"id":"third/canonical","canonical_slug":"third/dated2","pricing":{"prompt":"3","completion":"3"}}
+        ]}"#).unwrap();
+        for model in ["vendor/canonical", "canonical", "vendor/release", "release"] {
+            assert_eq!(catalog.lookup("any", model).unwrap().input_per_1k, 1000.0);
+        }
+        assert_eq!(
+            catalog.lookup("any", "other/dated").unwrap().input_per_1k,
+            2000.0
+        );
+    }
+
+    #[test]
+    fn ambiguous_id_last_segments_require_full_ids() {
+        let catalog = PricingCatalog::parse_openrouter(
+            r#"{"data":[
+            {"id":"a/shared","canonical_slug":"a/dated1","pricing":{"prompt":"1","completion":"1"}},
+            {"id":"b/shared","canonical_slug":"b/dated2","pricing":{"prompt":"2","completion":"2"}}
+        ]}"#,
+        )
+        .unwrap();
+        assert!(catalog.lookup("any", "shared").is_none());
+        assert_eq!(
+            catalog.lookup("any", "a/shared").unwrap().input_per_1k,
+            1000.0
+        );
+        assert_eq!(
+            catalog.lookup("any", "b/shared").unwrap().input_per_1k,
+            2000.0
+        );
     }
 
     async fn mock_endpoint(status: &str, body: &str) -> String {

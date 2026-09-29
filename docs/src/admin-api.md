@@ -260,7 +260,7 @@
 
 ## 模型价格 `/admin/pricing`
 
-模型价格用于按请求日志中的 provider、model 和 token 用量计算成本。启动时先从 OpenRouter Models API 加载基础价格,按完整 `canonical_slug` 或其最后一段匹配模型名,再加载 `pricing-catalog.json` 覆盖文件。Admin 设置的 override 会覆盖同名 `(provider, model)` 条目并立即生效。`provider: "*"` 表示适用于所有上游的通用价格。
+模型价格用于按请求日志中的 provider、model 和 token 用量计算成本。启动时先从 OpenRouter Models API 加载基础价格,依次按完整 `canonical_slug`、其最后一段、完整 `id`、其最后一段匹配模型名,再加载 `pricing-catalog.json` 覆盖文件。Admin 设置的 override 会覆盖同名 `(provider, model)` 条目并立即生效。`provider: "*"` 表示适用于所有上游的通用价格。
 
 ### GET `/admin/pricing`
 
@@ -285,7 +285,7 @@
 
 `source` 取值:
 
-- `openrouter` — 来自 OpenRouter API,以完整 canonical slug 展示,provider 为 `*`。
+- `openrouter` — 来自 OpenRouter API,以完整 API ID 展示(如 `openai/gpt-6-luna`),provider 为 `*`。
 - `catalog` — 来自 `pricing-catalog.json`。
 - `override` — 来自 Admin 存储,会覆盖 catalog 中相同 `(provider, model)` 的价格。
 

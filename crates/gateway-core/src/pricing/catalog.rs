@@ -24,8 +24,12 @@ struct CatalogFile {
 #[derive(Debug, Clone, Default)]
 pub struct PricingCatalog {
     by_key: HashMap<(String, String), PricingEntry>,
+    // Entries are displayed by API ID; canonical names remain preferred lookup keys.
     pub(super) openrouter: HashMap<String, PricingEntry>,
-    pub(super) openrouter_by_model: HashMap<String, String>,
+    pub(super) openrouter_by_slug: HashMap<String, String>,
+    pub(super) openrouter_by_slug_model: HashMap<String, String>,
+    pub(super) openrouter_by_id_model: HashMap<String, String>,
+    pub(super) openrouter_slugs: HashMap<String, String>,
 }
 
 impl PricingCatalog {
@@ -83,6 +87,10 @@ impl PricingCatalog {
                 !self
                     .by_key
                     .contains_key(&(e.provider.clone(), e.model.clone()))
+                    && !self.openrouter_slugs.get(&e.model).is_some_and(|slug| {
+                        self.by_key
+                            .contains_key(&(e.provider.clone(), slug.clone()))
+                    })
             }))
     }
 
@@ -113,16 +121,28 @@ impl PricingCatalog {
             })
             .or_else(|| self.by_key.get(&("*".to_string(), model.to_string())))
             .or_else(|| {
-                // Full canonical slugs take precedence over their last path segment.
-                let entry = self.openrouter.get(model).or_else(|| {
-                    self.openrouter_by_model
-                        .get(model)
-                        .and_then(|slug| self.openrouter.get(slug))
-                })?;
-                self.by_key
-                    .get(&(provider.to_string(), entry.model.clone()))
-                    .or_else(|| self.by_key.get(&("*".to_string(), entry.model.clone())))
-                    .or(Some(entry))
+                // Canonical slug, canonical last segment, API ID, then ID last segment.
+                let entry = self
+                    .openrouter_by_slug
+                    .get(model)
+                    .or_else(|| self.openrouter_by_slug_model.get(model))
+                    .and_then(|id| self.openrouter.get(id))
+                    .or_else(|| self.openrouter.get(model))
+                    .or_else(|| {
+                        self.openrouter_by_id_model
+                            .get(model)
+                            .and_then(|id| self.openrouter.get(id))
+                    })?;
+                let slug = self.openrouter_slugs.get(&entry.model)?;
+                // Continue honoring existing canonical-slug overrides after changing display IDs.
+                for scope in [provider, "*"] {
+                    for name in [&entry.model, slug] {
+                        if let Some(price) = self.by_key.get(&(scope.to_string(), name.clone())) {
+                            return Some(price);
+                        }
+                    }
+                }
+                Some(entry)
             })
     }
 }

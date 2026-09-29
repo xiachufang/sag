@@ -77,7 +77,7 @@ Cost 页右上角的 `Model Pricing` 会展开模型价格维护面板。
 
 模型价格以 USD / 1K tokens 计:
 
-- `openrouter` 表示启动时从 OpenRouter 拉取的基础价格,以完整 canonical slug 展示,provider 为 `*`。
+- `openrouter` 表示启动时从 OpenRouter 拉取的基础价格,以完整 API ID 展示(如 `openai/gpt-6-luna`),provider 为 `*`。
 - `catalog` 表示来自 `pricing-catalog.json` 的配置覆盖价格。
 - `override` 表示通过 UI 或 Admin API 写入的覆盖价格,会立即用于后续成本计算。
 - `Edit` 会把当前行填入表单,保存后成为 override。

@@ -365,7 +365,7 @@ budgets:
 | `thresholds[].action` | `notify`(发 webhook,默认幂等) / `block`(拒绝请求)。 |
 | `thresholds[].webhook` | 仅 `notify` 时使用,HTTP POST 一个 JSON 负载。 |
 
-成本基础价格在启动时从 [OpenRouter Models API](https://openrouter.ai/api/v1/models) 拉取一次,无需 API Key。先用请求的模型名匹配完整 `canonical_slug`,无法匹配时再匹配 `canonical_slug` 按 `/` 分割后的最后一段。该匹配不依赖上游 provider 名称,也不使用 API 的 `id` 作为别名。多个 canonical slug 的最后一段相同时不猜测价格,应使用完整 slug 或配置覆盖。同一 slug 有多个条目时优先采用非 `:variant` 的基础价格。
+成本基础价格在启动时从 [OpenRouter Models API](https://openrouter.ai/api/v1/models) 拉取一次,无需 API Key。先用请求的模型名匹配完整 `canonical_slug`,无法匹配时再匹配 `canonical_slug` 按 `/` 分割后的最后一段。若仍未匹配,依次尝试完整 `id` 和 `id` 按 `/` 分割后的最后一段。该匹配不依赖上游 provider 名称。价格列表显示 API 的 `id`,例如 `openai/gpt-6-luna`,同时支持 `openai/gpt-6-luna-20260922`、`gpt-6-luna-20260922` 和 `gpt-6-luna` 查价。同一层级的短名称对应多个模型时不猜测价格,应使用完整 slug/ID 或配置覆盖。同一 canonical slug 有多个条目时优先采用非 `:variant` 的基础价格;各 ID(包括 batch 等变体)保留自己的价格。
 
 接口的 `prompt`、`completion` 和 `input_cache_read` 单价从美元/token 转换为美元/千 tokens。未提供缓存读取价格时沿用输入价格。当前成本核算只包含输入、输出和缓存读取 token,不包含按次请求、图片、缓存写入或阶梯附加费用。
 
@@ -386,7 +386,7 @@ budgets:
 }
 ```
 
-`provider: "*"` 表示所有上游的通用价格,配合完整 canonical slug 可同时覆盖完整名和末段名匹配的价格;也可以指定实际 provider 和请求 model 为某个上游单独定价。覆盖按整条记录替换,未填缓存价时使用该记录的输入价。优先查找具体 provider 的配置价格,再查通用价格与 OpenRouter 基础价格。同一 `(provider, model)` 的优先级为 **Admin 覆盖 > 文件覆盖 > OpenRouter**。Admin 修改立即生效,删除后恢复文件或远端基础价格;文件修改和远端刷新需要重启。
+`provider: "*"` 表示所有上游的通用价格,配合完整 API ID 可覆盖该模型通过 canonical slug、ID 及其末段名匹配的价格,已有 canonical slug 覆盖仍然有效;也可以指定实际 provider 和请求 model 为某个上游单独定价。覆盖按整条记录替换,未填缓存价时使用该记录的输入价。优先查找具体 provider 的配置价格,再查通用价格与 OpenRouter 基础价格。同一 `(provider, model)` 的优先级为 **Admin 覆盖 > 文件覆盖 > OpenRouter**。Admin 修改立即生效,删除后恢复文件或远端基础价格;文件修改和远端刷新需要重启。
 
 远端请求最多等待 10 秒;网络错误、HTTP 错误或无有效价格时记录警告并使用本地价格继续启动。没有匹配价格的模型仍记录 token,成本为未知 (`NULL`),不计入成本聚合和预算累计。
 
